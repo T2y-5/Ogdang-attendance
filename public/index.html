@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">
+      <div class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 10 L16 4 L28 10 L28 22 L16 28 L4 22 Z"></path>
+          <path d="M4 10 L16 16 L28 10"></path>
+          <path d="M16 16 L16 28"></path>
+        </svg>
+      </div>
+      <span class="logo-name">Attendance</span>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="students">Students</button>
+      <button class="tab" data-tab="sessions">Events</button>
+      <button class="tab" data-tab="attendance">Scanner</button>
+      <button class="tab" data-tab="reports">Reports</button>
+    </nav>
+
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="exportData()" title="Download a JSON backup">Backup</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()" title="Restore from a JSON backup">Restore</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="kicker" id="heroKicker"></p>
+      <h1>Attendance overview</h1>
+      <p class="hero-sub">Students check in by scanning their ID during the event time window.</p>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <span class="stat-num" id="statStudents">0</span>
+        <span class="stat-label">Students</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num" id="statSessions">0</span>
+        <span class="stat-label">Events</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num" id="statRate">0%</span>
+        <span class="stat-label">Overall attendance</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STUDENTS ============ -->
+  <section id="tab-students" class="view active">
+    <div class="layout">
+      <div class="panel form-panel">
+        <div class="panel-head">
+          <h2 id="studentFormTitle">Add student</h2>
+        </div>
+        <form id="studentForm" class="form">
+          <input type="hidden" id="studentId">
+          <label for="studentScanId">Student ID</label>
+          <input type="text" id="studentScanId" placeholder="e.g. 201-0042" autocomplete="off" required>
+          <label for="studentName">Full name</label>
+          <input type="text" id="studentName" placeholder="e.g. Maya Kapoor" autocomplete="off" required>
+          <label for="studentEmail">Email <span class="opt">(optional)</span></label>
+          <input type="email" id="studentEmail" placeholder="e.g. maya@school.edu" autocomplete="off">
+          <button class="btn btn-primary btn-block" type="submit" id="studentSubmitBtn">Add student</button>
+          <button class="btn btn-ghost btn-block" id="cancelStudentBtn" type="button" style="display:none" onclick="resetStudentForm()">Cancel edit</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Students <span class="count-chip" id="studentCount">0</span></h2>
+        </div>
+        <div id="studentList" class="list-wrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SESSIONS ============ -->
+  <section id="tab-sessions" class="view">
+    <div class="layout">
+      <div class="panel form-panel">
+        <div class="panel-head">
+          <h2 id="sessionFormTitle">Add event</h2>
+        </div>
+        <form id="sessionForm" class="form">
+          <input type="hidden" id="sessionId">
+          <label for="sessionTitle">Title</label>
+          <input type="text" id="sessionTitle" placeholder="e.g. Christmas Party" autocomplete="off" required>
+          <label for="sessionDate">Date</label>
+          <input type="date" id="sessionDate" required>
+          <div class="time-pair">
+            <div>
+              <label for="sessionStart">Start time</label>
+              <input type="time" id="sessionStart" required>
+            </div>
+            <div>
+              <label for="sessionEnd">End time</label>
+              <input type="time" id="sessionEnd" required>
+            </div>
+          </div>
+          <label for="sessionNotes">Notes <span class="opt">(optional)</span></label>
+          <input type="text" id="sessionNotes" placeholder="e.g. Main Hall, 5th floor">
+          <button class="btn btn-primary btn-block" type="submit" id="sessionSubmitBtn">Add event</button>
+          <button class="btn btn-ghost btn-block" id="cancelSessionBtn" type="button" style="display:none" onclick="resetSessionForm()">Cancel edit</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Events <span class="count-chip" id="sessionCount">0</span></h2>
+        </div>
+        <div id="sessionList" class="list-wrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCANNER ============ -->
+  <section id="tab-attendance" class="view">
+    <div class="panel">
+      <div class="panel-head panel-head-split">
+        <h2>ID scanner</h2>
+        <div class="picker-wrap">
+          <label for="attendanceSessionSelect" class="visually-hidden">Select event</label>
+          <select id="attendanceSessionSelect" onchange="loadAttendanceSheet()"></select>
+        </div>
+      </div>
+
+      <div class="scanner-status">
+        <div class="clock-row">
+          <span class="live-clock" id="liveClock">--:--:--</span>
+          <span class="window-time" id="windowTime"></span>
+          <span class="pill pill-warn" id="windowBadge">Select an event</span>
+        </div>
+
+        <form id="scanForm" class="scan-form" autocomplete="off">
+          <input type="text" id="scanInput" placeholder="Scan or type student ID..." autocomplete="off" disabled>
+          <button class="btn btn-primary" type="submit" disabled>Check in</button>
+        </form>
+
+        <div class="scan-feedback" id="scanFeedback">
+          <span class="scan-feedback-text">Waiting for a scan…</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head panel-head-split">
+        <h2>Event roster</h2>
+        <div class="mini-counts">
+          <span class="pill pill-good" id="miniPresent">0 present</span>
+          <span class="pill pill-bad" id="miniAbsent">0 absent</span>
+          <span class="pill" id="miniUnmarked">0 unmarked</span>
+        </div>
+      </div>
+      <div id="attendanceSheet" class="list-wrap"></div>
+      <div class="quick-actions">
+        <button class="btn btn-outline btn-sm" onclick="bulkMark('present')">Mark everyone present</button>
+        <button class="btn btn-outline btn-sm" onclick="bulkMark('unmarked')">Reset all marks</button>
+      </div>
+      <p class="panel-note">Corrections below bypass the time window. Check-ins via the scanner are time-stamped.</p>
+    </div>
+  </section>
+
+  <!-- ============ REPORTS ============ -->
+  <section id="tab-reports" class="view">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Attendance summary</h2>
+      </div>
+      <div id="reportSummary" class="report-summary"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Student breakdown</h2>
+      </div>
+      <div id="reportTable" class="list-wrap"></div>
+    </div>
+  </section>
+
+  <section class="danger-zone">
+    <span class="danger-note">Danger zone</span>
+    <button class="btn btn-danger btn-sm" onclick="confirmReset()">Delete all data</button>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Are you sure?</h3>
+    </div>
+    <p id="modalMessage"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" id="modalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
