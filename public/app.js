@@ -13,6 +13,27 @@ const state = {
 function openAuthModal() {
   document.getElementById('authPasscode').value = '';
   document.getElementById('authModal').style.display = 'flex';
+
+  const role = state.userRole || 'student';
+  const statusBox = document.getElementById('activeRoleStatusBox');
+  const roleNameText = document.getElementById('activeRoleNameText');
+  const promptText = document.getElementById('authModalPromptText');
+
+  if (role === 'admin' || role === 'instructor') {
+    if (statusBox) {
+      statusBox.style.display = 'flex';
+      statusBox.style.background = role === 'admin' ? '#dcfce7' : '#f3e8ff';
+      statusBox.style.color = role === 'admin' ? '#15803d' : '#7e22ce';
+    }
+    if (roleNameText) {
+      roleNameText.textContent = role === 'admin' ? '🛡️ Admin Mode' : '👨‍🏫 Instructor Mode';
+    }
+    if (promptText) promptText.textContent = 'Switch role or enter PIN below:';
+  } else {
+    if (statusBox) statusBox.style.display = 'none';
+    if (promptText) promptText.textContent = 'Enter your PIN to unlock administrative features:';
+  }
+
   document.getElementById('authPasscode').focus();
 }
 
@@ -36,12 +57,16 @@ async function handleAuthSubmit(e) {
   }
 }
 
-function lockToStudentMode() {
+function logoutUser() {
   state.userRole = 'student';
   localStorage.setItem('ogdang_user_role', 'student');
-  toast('Locked to Student Mode');
+  toast('Logged out successfully (Student Mode locked)');
   closeAuthModal();
   applyRoleSecurity();
+}
+
+function lockToStudentMode() {
+  logoutUser();
 }
 
 function applyRoleSecurity() {

@@ -398,7 +398,16 @@
       <h3 style="margin:0;">🔐 System Passcode Auth</h3>
       <button class="btn btn-ghost btn-sm" onclick="closeAuthModal()" style="padding:2px 8px;">✕</button>
     </div>
-    <p class="meta" style="margin-top:6px; margin-bottom:12px;">Enter your PIN to unlock administrative features:</p>
+    
+    <div id="activeRoleStatusBox" style="margin-top:10px; margin-bottom:12px; padding:10px; border-radius:8px; display:none; justify-content:space-between; align-items:center;">
+      <div>
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; opacity:0.8;">Currently Logged In As</div>
+        <strong id="activeRoleNameText" style="font-size:1.05rem;">Admin</strong>
+      </div>
+      <button type="button" class="btn btn-danger btn-sm" onclick="logoutUser()" style="padding:6px 12px;">🚪 Log Out</button>
+    </div>
+
+    <p class="meta" style="margin-top:6px; margin-bottom:12px;" id="authModalPromptText">Enter your PIN to unlock administrative features:</p>
     <form id="authForm" onsubmit="handleAuthSubmit(event)">
       <input type="password" id="authPasscode" placeholder="Enter PIN (e.g. admin123)" required style="width:100%; margin-bottom:12px; font-size:1.1rem; text-align:center; letter-spacing:2px; padding:10px;">
       <div style="font-size:0.8rem; color:#4b5563; background:#f3f4f6; padding:10px 12px; border-radius:8px; margin-bottom:14px; border:1px solid #e5e7eb;">
