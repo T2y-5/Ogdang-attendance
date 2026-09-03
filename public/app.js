@@ -530,17 +530,27 @@ document.getElementById('sessionForm').addEventListener('submit', async e => {
   const courseId = document.getElementById('sessionCourse').value;
   const title = document.getElementById('sessionTitle').value.trim();
   const date = document.getElementById('sessionDate').value;
-  const startTime = document.getElementById('sessionStart').value;
-  const endTime = document.getElementById('sessionEnd').value;
+  let startTime = document.getElementById('sessionStart').value;
+  let endTime = document.getElementById('sessionEnd').value;
   const room = document.getElementById('sessionRoom').value.trim();
-  const notes = document.getElementById('sessionNotes').value.trim();
-  const lateFine = Number(document.getElementById('sessionLateFine')?.value) || 0;
-  const absentFine = Number(document.getElementById('sessionAbsentFine')?.value) || 0;
+  const notes = document.getElementById('sessionNotes')?.value?.trim() || '';
+  const lateFineInput = document.getElementById('sessionLateFine')?.value;
+  const absentFineInput = document.getElementById('sessionAbsentFine')?.value;
+
+  const lateFine = lateFineInput !== undefined && lateFineInput !== '' && !isNaN(lateFineInput) ? Math.max(0, Number(lateFineInput)) : 0;
+  const absentFine = absentFineInput !== undefined && absentFineInput !== '' && !isNaN(absentFineInput) ? Math.max(0, Number(absentFineInput)) : 0;
+
+  // Default times if empty or incomplete
+  if (!startTime) startTime = '08:00';
+  if (!endTime) endTime = '17:00';
 
   const exemptCheckboxes = document.querySelectorAll('input[name="exemptRoles"]:checked');
   const exemptRoles = Array.from(exemptCheckboxes).map(cb => cb.value);
 
-  if (!title || !date || !startTime || !endTime) return;
+  if (!title || !date) {
+    toast('Please enter a title and date');
+    return;
+  }
   try {
     if (id) {
       await put(`/api/sessions/${id}`, { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine });
@@ -564,7 +574,7 @@ function editSession(id) {
   document.getElementById('sessionStart').value = s.startTime || '';
   document.getElementById('sessionEnd').value = s.endTime || '';
   document.getElementById('sessionRoom').value = s.room || '';
-  document.getElementById('sessionNotes').value = s.notes || '';
+  if (document.getElementById('sessionNotes')) document.getElementById('sessionNotes').value = s.notes || '';
   if (document.getElementById('sessionLateFine')) document.getElementById('sessionLateFine').value = s.lateFine || 0;
   if (document.getElementById('sessionAbsentFine')) document.getElementById('sessionAbsentFine').value = s.absentFine || 0;
   

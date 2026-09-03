@@ -118,17 +118,19 @@ app.get('/api/sessions', wrap(async (req, res) => {
 }));
 
 app.post('/api/sessions', wrap(async (req, res) => {
-  const { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine } = req.body || {};
+  let { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine } = req.body || {};
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
   if (!date) return res.status(400).json({ error: 'Date is required' });
-  if (!startTime || !endTime) return res.status(400).json({ error: 'Start and end time are required' });
+
+  startTime = (startTime && String(startTime).trim()) ? String(startTime).trim() : '08:00';
+  endTime = (endTime && String(endTime).trim()) ? String(endTime).trim() : '17:00';
 
   const session = await store.createSession({
     courseId: courseId || '',
     title: String(title).trim(),
     date,
-    startTime: String(startTime).trim(),
-    endTime: String(endTime).trim(),
+    startTime,
+    endTime,
     room: String(room || '').trim(),
     notes: String(notes || '').trim(),
     exemptRoles: Array.isArray(exemptRoles) ? exemptRoles : [],
@@ -139,17 +141,19 @@ app.post('/api/sessions', wrap(async (req, res) => {
 }));
 
 app.put('/api/sessions/:id', wrap(async (req, res) => {
-  const { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine } = req.body || {};
+  let { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine } = req.body || {};
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
   if (!date) return res.status(400).json({ error: 'Date is required' });
-  if (!startTime || !endTime) return res.status(400).json({ error: 'Start and end time are required' });
+
+  startTime = (startTime && String(startTime).trim()) ? String(startTime).trim() : '08:00';
+  endTime = (endTime && String(endTime).trim()) ? String(endTime).trim() : '17:00';
 
   const updated = await store.updateSession(req.params.id, {
     courseId: courseId || '',
     title: String(title).trim(),
     date,
-    startTime: String(startTime).trim(),
-    endTime: String(endTime).trim(),
+    startTime,
+    endTime,
     room: String(room || '').trim(),
     notes: String(notes || '').trim(),
     exemptRoles: Array.isArray(exemptRoles) ? exemptRoles : [],
