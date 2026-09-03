@@ -886,6 +886,7 @@ function downloadCSV() {
 function renderReports() {
   const summary = document.getElementById('reportSummary');
   const table = document.getElementById('reportTable');
+  const filterSelect = document.getElementById('reportEventFilter');
 
   if (!state.sessions.length || !state.students.length) {
     summary.innerHTML = emptyBox('No data yet.', 'Add students and events, then mark some attendance.');
@@ -893,7 +894,23 @@ function renderReports() {
     return;
   }
 
-  summary.innerHTML = state.sessions.map(s => {
+  // Populate Event Filter Dropdown
+  if (filterSelect) {
+    const curVal = filterSelect.value;
+    filterSelect.innerHTML = '<option value="">🌐 All Events Overall</option>' +
+      state.sessions.map(s => {
+        const prefix = s.courseCode ? `[${s.courseCode}] ` : '';
+        return `<option value="${s.id}">${esc(prefix)}${fmtDate(s.date)} — ${esc(s.title)}</option>`;
+      }).join('');
+    if (curVal && state.sessions.some(s => s.id === curVal)) {
+      filterSelect.value = curVal;
+    }
+  }
+
+  const selectedEventId = filterSelect ? filterSelect.value : '';
+  const displaySessions = selectedEventId ? state.sessions.filter(s => s.id === selectedEventId) : state.sessions;
+
+  summary.innerHTML = displaySessions.map(s => {
     const total = state.students.length;
     const present = (s.present || 0);
     const late = (s.late || 0);
@@ -914,16 +931,20 @@ function renderReports() {
   }).join('');
 
   get('/api/report').then(report => {
-    // Render Stat Cards Metrics
+    // Filter sessions data if an event is selected
+    const sessionsList = selectedEventId
+      ? (report.sessions || []).filter(s => s.id === selectedEventId)
+      : (report.sessions || []);
+
     let totalPresent = 0, totalLate = 0, totalExempted = 0, totalFinesAccrued = 0;
-    (report.sessions || []).forEach(s => {
+    sessionsList.forEach(s => {
       totalPresent += (s.present || 0);
       totalLate += (s.late || 0);
     });
     const totalCheckins = totalPresent + totalLate;
     const punctuality = totalCheckins ? Math.round((totalPresent / totalCheckins) * 100) : 100;
 
-    // Count exemptions & total fines across students
+    // Count exemptions & total fines
     (report.students || []).forEach(st => {
       totalExempted += (st.exempted || 0);
       totalFinesAccrued += (Number(st.totalFines) || 0);
@@ -934,9 +955,9 @@ function renderReports() {
     if (document.getElementById('repStatExemptions')) document.getElementById('repStatExemptions').textContent = totalExempted;
     if (document.getElementById('repStatFines')) document.getElementById('repStatFines').textContent = `₱${totalFinesAccrued.toFixed(2)}`;
 
-    // Render Charts
-    renderAnalyticsChart(report.sessions);
-    renderCoursePieChart(report.sessions);
+    // Render Charts with filtered/overall session data
+    renderAnalyticsChart(sessionsList);
+    renderCoursePieChart(sessionsList);
     renderYearChart();
 
     const rows = report.students.map(st => {
