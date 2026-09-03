@@ -172,7 +172,8 @@ async function loadAttendanceSheet() {
     updateScannerStatus();
     return;
   }
-  const rows = await get(`/api/sessions/${sid}/attendance`);
+  const res = await get(`/api/sessions/${sid}/attendance`);
+  const rows = Array.isArray(res) ? res : (res && Array.isArray(res.records) ? res.records : []);
   state.attendance = {};
   rows.forEach(r => {
     state.attendance[r.studentId] = { status: r.status, scannedAt: r.scannedAt, excuse: r.excuse || '' };
