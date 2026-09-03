@@ -34,6 +34,10 @@
     </nav>
 
     <div class="topbar-actions">
+      <button class="live-clock" id="userRoleBtn" onclick="openAuthModal()" title="Click to unlock Admin or Instructor access" style="background:#f3f4f6; color:#374151; font-weight:600; cursor:pointer;">
+        <span id="roleIcon">🔒</span>
+        <span id="roleLabel">Student Mode</span>
+      </button>
       <div class="live-clock" id="liveClock" onclick="toggleClockFormat()" title="Click to toggle 12H / 24H time format">
         <span class="clock-icon">🕒</span>
         <span id="clockTime">00:00:00 AM</span>
@@ -200,8 +204,17 @@
           </div>
           <label for="sessionRoom">Location / Room <span class="opt">(optional)</span></label>
           <input type="text" id="sessionRoom" placeholder="e.g. Hall A-102">
-          <label for="sessionNotes">Notes <span class="opt">(optional)</span></label>
-          <input type="text" id="sessionNotes" placeholder="e.g. Bring student ID cards">
+          <div class="time-pair" style="margin-top:6px;">
+            <div>
+              <label for="sessionLateFine">Late fine (₱) <span class="opt">(optional)</span></label>
+              <input type="number" id="sessionLateFine" min="0" step="0.5" placeholder="0.00" value="0">
+            </div>
+            <div>
+              <label for="sessionAbsentFine">Absent fine (₱) <span class="opt">(optional)</span></label>
+              <input type="number" id="sessionAbsentFine" min="0" step="0.5" placeholder="0.00" value="0">
+            </div>
+          </div>
+
           <label>Auto-Exempt Roles <span class="opt">(optional)</span></label>
           <div class="checkbox-group-box" style="margin-bottom:12px;">
             <p class="meta">Roles automatically marked as Exempted:</p>
@@ -304,6 +317,11 @@
         <div class="stat-value" id="repStatExemptions" style="font-size:1.6rem; font-weight:800; color:#7e22ce; margin-top:4px;">0</div>
         <div class="scan-meta" style="margin-top:2px;">Athletes & Officers Exempted</div>
       </div>
+      <div class="panel stat-card" style="padding:14px;">
+        <div class="meta">Total Fines Accrued</div>
+        <div class="stat-value" id="repStatFines" style="font-size:1.6rem; font-weight:800; color:#dc2626; margin-top:4px;">₱0.00</div>
+        <div class="scan-meta" style="margin-top:2px;">Accumulated Late & Absent Fines</div>
+      </div>
     </div>
 
     <!-- Analytics Charts Grid -->
@@ -371,6 +389,26 @@
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-danger" id="modalConfirm">Confirm</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="authModal" style="display:none;">
+  <div class="modal" style="max-width:400px; text-align:left;">
+    <div class="modal-head" style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">🔐 System Passcode Auth</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeAuthModal()" style="padding:2px 8px;">✕</button>
+    </div>
+    <p class="meta" style="margin-top:6px; margin-bottom:12px;">Enter your PIN to unlock administrative features:</p>
+    <form id="authForm" onsubmit="handleAuthSubmit(event)">
+      <input type="password" id="authPasscode" placeholder="Enter PIN (e.g. admin123)" required style="width:100%; margin-bottom:12px; font-size:1.1rem; text-align:center; letter-spacing:2px; padding:10px;">
+      <div style="font-size:0.8rem; color:#4b5563; background:#f3f4f6; padding:10px 12px; border-radius:8px; margin-bottom:14px; border:1px solid #e5e7eb;">
+        💡 <strong>Default Access PINs:</strong><br>
+        • <strong>Admin</strong>: <code>admin123</code> (Full Configuration Access)<br>
+        • <strong>Instructor</strong>: <code>teacher123</code> (Scan & Take Attendance)
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" style="padding:10px;">Unlock Privileges</button>
+      <button type="button" class="btn btn-ghost btn-block" onclick="lockToStudentMode()" style="margin-top:6px;">Lock to Student Mode</button>
+    </form>
   </div>
 </div>
 

@@ -1,344 +1,354 @@
-const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'attendance.db');
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ogdang_attendance';
 
-const db = new DatabaseSync(DB_PATH);
-
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS students (
-    id         TEXT PRIMARY KEY,
-    student_id TEXT DEFAULT '',
-    name       TEXT NOT NULL,
-    email      TEXT DEFAULT '',
-    created_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS courses (
-    id          TEXT PRIMARY KEY,
-    code        TEXT NOT NULL UNIQUE,
-    name        TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    color       TEXT DEFAULT '#8b5cf6',
-    created_at  INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS enrollments (
-    course_id  TEXT NOT NULL,
-    student_id TEXT NOT NULL,
-    PRIMARY KEY (course_id, student_id),
-    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
-    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id         TEXT PRIMARY KEY,
-    course_id  TEXT DEFAULT '',
-    title      TEXT NOT NULL,
-    date       TEXT NOT NULL,
-    start_time TEXT DEFAULT '',
-    end_time   TEXT DEFAULT '',
-    room       TEXT DEFAULT '',
-    notes      TEXT DEFAULT '',
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL
-  );
-`);
-
-// Table migration for attendance table (to allow 'late' and 'exempted' in status check and excuse column)
-function ensureAttendanceTable() {
-  const info = db.prepare(`PRAGMA table_info(attendance)`).all();
-  const hasExcuse = info.some(c => c.name === 'excuse');
-  if (!info.length) {
-    db.exec(`
-      CREATE TABLE attendance (
-        session_id TEXT NOT NULL,
-        student_id TEXT NOT NULL,
-        status     TEXT NOT NULL CHECK (status IN ('present', 'late', 'exempted', 'absent', 'unmarked')),
-        scanned_at INTEGER,
-        excuse     TEXT DEFAULT '',
-        PRIMARY KEY (session_id, student_id),
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-      );
-    `);
-  } else {
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS attendance_v3 (
-          session_id TEXT NOT NULL,
-          student_id TEXT NOT NULL,
-          status     TEXT NOT NULL CHECK (status IN ('present', 'late', 'exempted', 'absent', 'unmarked')),
-          scanned_at INTEGER,
-          excuse     TEXT DEFAULT '',
-          PRIMARY KEY (session_id, student_id),
-          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-          FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-        );
-        INSERT OR IGNORE INTO attendance_v3 (session_id, student_id, status, scanned_at, excuse)
-        SELECT session_id, student_id, status, scanned_at, COALESCE(excuse, '') FROM attendance;
-        DROP TABLE attendance;
-        ALTER TABLE attendance_v3 RENAME TO attendance;
-      `);
-    } catch (err) {
-      // Migration already completed or unneeded
-    }
-  }
-}
-ensureAttendanceTable();
-
-// --- migrations for databases created before these columns existed ---
-function ensureColumn(table, column, ddl) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!cols.some(c => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  }
-}
-ensureColumn('students', 'student_id', "student_id TEXT DEFAULT ''");
-ensureColumn('students', 'year_level', "year_level TEXT DEFAULT '1st Year'");
-ensureColumn('students', 'role', "role TEXT DEFAULT 'Student'");
-ensureColumn('enrollments', 'enrolled_at', "enrolled_at TEXT DEFAULT CURRENT_TIMESTAMP");
-ensureColumn('sessions', 'course_id', "course_id TEXT DEFAULT ''");
-ensureColumn('sessions', 'start_time', "start_time TEXT DEFAULT ''");
-ensureColumn('sessions', 'end_time', "end_time TEXT DEFAULT ''");
-ensureColumn('sessions', 'room', "room TEXT DEFAULT ''");
-ensureColumn('sessions', 'notes', "notes TEXT DEFAULT ''");
-ensureColumn('sessions', 'exempt_roles', "exempt_roles TEXT DEFAULT '[]'");
-
-// unique scan IDs, but allow multiple students with no ID assigned
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_students_scan ON students(student_id) WHERE student_id <> ''");
-
-function transaction(fn) {
-  db.exec('BEGIN');
+async function initMongo() {
   try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
+    console.log('Attempting MongoDB connection at:', MONGODB_URI);
+    await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 3000 });
+    console.log('✅ Connected to MongoDB server successfully');
   } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
+    console.log('⚠️ Local MongoDB server not reachable. Starting embedded MongoMemoryServer...');
+    const mongoServer = await MongoMemoryServer.create();
+    const uri = mongoServer.getUri();
+    console.log('🚀 Embedded MongoDB server started at:', uri);
+    await mongoose.connect(uri);
+    console.log('✅ Connected to Embedded MongoDB successfully!');
   }
 }
 
-// ---------- Students ----------
-const listStudents = () => {
-  const students = db.prepare('SELECT id, student_id AS studentId, name, email, year_level AS yearLevel, role, created_at AS createdAt FROM students ORDER BY name COLLATE NOCASE').all();
-  const enrollments = db.prepare(`
-    SELECT e.student_id AS studentId, c.id AS courseId, c.code AS courseCode, c.name AS courseName, c.color AS courseColor, e.enrolled_at AS enrolledAt
-    FROM enrollments e
-    JOIN courses c ON c.id = e.course_id
-    ORDER BY e.enrolled_at DESC, e.rowid DESC
-  `).all();
-  
-  const map = {};
-  for (const e of enrollments) {
-    if (!map[e.studentId]) map[e.studentId] = [];
-    map[e.studentId].push({ id: e.courseId, code: e.courseCode, name: e.courseName, color: e.courseColor, enrolledAt: e.enrolledAt });
-  }
-  return students.map(s => ({ ...s, courses: map[s.id] || [] }));
-};
+initMongo();
 
-const getStudent = id => {
-  const student = db.prepare('SELECT id, student_id AS studentId, name, email, year_level AS yearLevel, role, created_at AS createdAt FROM students WHERE id = ?').get(id);
-  if (!student) return null;
-  const courses = db.prepare(`
-    SELECT c.id, c.code, c.name, c.color, e.enrolled_at AS enrolledAt
-    FROM enrollments e
-    JOIN courses c ON c.id = e.course_id
-    WHERE e.student_id = ?
-    ORDER BY e.enrolled_at DESC, e.rowid DESC
-  `).all(id);
-  return { ...student, courses };
-};
+// Schemas
+const CourseSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  code: { type: String, required: true },
+  name: { type: String, required: true },
+  description: { type: String, default: '' },
+  color: { type: String, default: '#8b5cf6' },
+  createdAt: { type: Number, default: Date.now }
+});
 
-const getStudentByScanId = scanId =>
-  db.prepare('SELECT id, student_id AS studentId, name, email, year_level AS yearLevel, role FROM students WHERE student_id = ? COLLATE NOCASE').get(scanId);
+const StudentSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  studentId: { type: String, default: '' },
+  name: { type: String, required: true },
+  email: { type: String, default: '' },
+  yearLevel: { type: String, default: '1st Year' },
+  role: { type: String, default: 'Student' },
+  createdAt: { type: Number, default: Date.now }
+});
 
-const createStudent = ({ id, studentId, name, email, yearLevel, role, createdAt }) =>
-  db.prepare('INSERT INTO students (id, student_id, name, email, year_level, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(id, studentId || '', name, email || '', yearLevel || '1st Year', role || 'Student', createdAt);
+const EnrollmentSchema = new mongoose.Schema({
+  courseId: { type: String, required: true },
+  studentId: { type: String, required: true },
+  enrolledAt: { type: Number, default: Date.now }
+});
 
-const updateStudent = ({ id, studentId, name, email, yearLevel, role }) =>
-  db.prepare('UPDATE students SET student_id = ?, name = ?, email = ?, year_level = ?, role = ? WHERE id = ?')
-    .run(studentId || '', name, email || '', yearLevel || '1st Year', role || 'Student', id);
+const SessionSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  courseId: { type: String, default: '' },
+  title: { type: String, required: true },
+  date: { type: String, required: true },
+  startTime: { type: String, default: '' },
+  endTime: { type: String, default: '' },
+  room: { type: String, default: '' },
+  notes: { type: String, default: '' },
+  exemptRoles: { type: [String], default: [] },
+  lateFine: { type: Number, default: 0 },
+  absentFine: { type: Number, default: 0 },
+  createdAt: { type: Number, default: Date.now }
+});
 
-const deleteStudent = id =>
-  db.prepare('DELETE FROM students WHERE id = ?').run(id);
+const AttendanceSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true },
+  studentId: { type: String, required: true },
+  status: { type: String, enum: ['present', 'late', 'exempted', 'absent', 'unmarked'], default: 'unmarked' },
+  scannedAt: { type: Number, default: null },
+  excuse: { type: String, default: '' }
+});
 
-// ---------- Courses ----------
-const listCourses = () =>
-  db.prepare(`
-    SELECT c.id, c.code, c.name, c.description, c.color, c.created_at AS createdAt,
-           COUNT(DISTINCT e.student_id) AS studentCount,
-           COUNT(DISTINCT s.id) AS sessionCount
-    FROM courses c
-    LEFT JOIN enrollments e ON e.course_id = c.id
-    LEFT JOIN sessions s ON s.course_id = c.id
-    GROUP BY c.id
-    ORDER BY c.code COLLATE NOCASE
-  `).all();
+const Course = mongoose.model('Course', CourseSchema);
+const Student = mongoose.model('Student', StudentSchema);
+const Enrollment = mongoose.model('Enrollment', EnrollmentSchema);
+const Session = mongoose.model('Session', SessionSchema);
+const Attendance = mongoose.model('Attendance', AttendanceSchema);
 
-const getCourse = id =>
-  db.prepare('SELECT id, code, name, description, color, created_at AS createdAt FROM courses WHERE id = ?').get(id);
+// Helper for generating IDs
+const uid = prefix => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
-const createCourse = ({ id, code, name, description, color, createdAt }) =>
-  db.prepare('INSERT INTO courses (id, code, name, description, color, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, code, name, description || '', color || '#8b5cf6', createdAt);
-
-const updateCourse = ({ id, code, name, description, color }) =>
-  db.prepare('UPDATE courses SET code = ?, name = ?, description = ?, color = ? WHERE id = ?')
-    .run(code, name, description || '', color || '#8b5cf6', id);
-
-const deleteCourse = id =>
-  db.prepare('DELETE FROM courses WHERE id = ?').run(id);
-
-const enrollStudent = (courseId, studentId) =>
-  db.prepare('INSERT OR REPLACE INTO enrollments (course_id, student_id, enrolled_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run(courseId, studentId);
-
-const unenrollStudent = (courseId, studentId) =>
-  db.prepare('DELETE FROM enrollments WHERE course_id = ? AND student_id = ?').run(courseId, studentId);
-
-function parseExemptRoles(jsonStr) {
-  try {
-    return JSON.parse(jsonStr || '[]');
-  } catch (e) {
-    return [];
-  }
-}
-
-const listSessions = () => {
-  const rows = db.prepare(`
-    SELECT s.id, s.course_id AS courseId, s.title, s.date, s.start_time AS startTime, s.end_time AS endTime, s.room, s.notes, s.exempt_roles AS exemptRoles, s.created_at AS createdAt,
-           c.code AS courseCode, c.name AS courseName, c.color AS courseColor,
-           COUNT(a.student_id) AS marked,
-           SUM(CASE WHEN a.status IN ('present', 'late') THEN 1 ELSE 0 END) AS present,
-           SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late
-    FROM sessions s
-    LEFT JOIN courses c ON c.id = s.course_id
-    LEFT JOIN attendance a ON a.session_id = s.id
-    GROUP BY s.id
-    ORDER BY s.date DESC, s.created_at DESC
-  `).all();
-  return rows.map(r => ({ ...r, exemptRoles: parseExemptRoles(r.exemptRoles) }));
-};
-
-const getSession = id => {
-  const r = db.prepare(`
-    SELECT s.id, s.course_id AS courseId, s.title, s.date, s.start_time AS startTime, s.end_time AS endTime, s.room, s.notes, s.exempt_roles AS exemptRoles, s.created_at AS createdAt,
-           c.code AS courseCode, c.name AS courseName, c.color AS courseColor
-    FROM sessions s
-    LEFT JOIN courses c ON c.id = s.course_id
-    WHERE s.id = ?
-  `).get(id);
-  if (!r) return null;
-  return { ...r, exemptRoles: parseExemptRoles(r.exemptRoles) };
-};
-
-const createSession = ({ id, courseId, title, date, startTime, endTime, room, notes, exemptRoles, createdAt }) => {
-  const rolesJson = JSON.stringify(exemptRoles || []);
-  return db.prepare('INSERT INTO sessions (id, course_id, title, date, start_time, end_time, room, notes, exempt_roles, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(id, courseId || '', title, date, startTime || '', endTime || '', room || '', notes || '', rolesJson, createdAt);
-};
-
-const updateSession = ({ id, courseId, title, date, startTime, endTime, room, notes, exemptRoles }) => {
-  const rolesJson = JSON.stringify(exemptRoles || []);
-  return db.prepare('UPDATE sessions SET course_id = ?, title = ?, date = ?, start_time = ?, end_time = ?, room = ?, notes = ?, exempt_roles = ? WHERE id = ?')
-    .run(courseId || '', title, date, startTime || '', endTime || '', room || '', notes || '', rolesJson, id);
-};
-
-const deleteSession = id =>
-  db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
-
-// ---------- Attendance ----------
-const getAttendance = sessionId =>
-  db.prepare(`
-    SELECT a.student_id AS studentId, a.status, a.scanned_at AS scannedAt, a.excuse,
-           s.name AS studentName, s.student_id AS scanId
-    FROM attendance a
-    JOIN students s ON s.id = a.student_id
-    WHERE a.session_id = ?
-    ORDER BY a.scanned_at IS NULL, a.scanned_at ASC
-  `).all(sessionId);
-
-const upsertAttendance = db.prepare(`
-  INSERT INTO attendance (session_id, student_id, status, scanned_at, excuse) VALUES (?, ?, ?, ?, ?)
-  ON CONFLICT (session_id, student_id) DO UPDATE SET
-    status = excluded.status,
-    scanned_at = COALESCE(excluded.scanned_at, attendance.scanned_at),
-    excuse = excluded.excuse
-`);
-
-const report = () => {
-  const students = db.prepare(`
-    SELECT s.id, s.name, s.email, s.student_id AS studentId,
-           COUNT(DISTINCT x.session_id) AS sessions,
-           COALESCE(SUM(CASE WHEN x.status = 'present' THEN 1 ELSE 0 END), 0) AS present,
-           COALESCE(SUM(CASE WHEN x.status = 'late' THEN 1 ELSE 0 END), 0) AS late,
-           COALESCE(SUM(CASE WHEN x.status = 'absent' THEN 1 ELSE 0 END), 0) AS absent,
-           COALESCE(SUM(CASE WHEN x.status = 'unmarked' THEN 1 ELSE 0 END), 0) AS unmarked
-    FROM students s
-    LEFT JOIN (
-      SELECT a.* FROM attendance a
-      JOIN sessions ss ON ss.id = a.session_id
-    ) x ON x.student_id = s.id
-    GROUP BY s.id
-    ORDER BY s.name COLLATE NOCASE
-  `).all();
-
-  const sessions = db.prepare(`
-    SELECT ss.id, ss.title, ss.date, ss.course_id AS courseId, c.code AS courseCode, c.color AS courseColor,
-           (SELECT COUNT(*) FROM students) AS totalStudents,
-           COALESCE(SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END), 0) AS present,
-           COALESCE(SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END), 0) AS late,
-           COALESCE(SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END), 0) AS absent,
-           COALESCE(SUM(CASE WHEN a.status = 'unmarked' THEN 1 ELSE 0 END), 0) AS unmarked
-    FROM sessions ss
-    LEFT JOIN courses c ON c.id = ss.course_id
-    LEFT JOIN attendance a ON a.session_id = ss.id
-    GROUP BY ss.id
-    ORDER BY ss.date DESC, ss.created_at DESC
-  `).all();
-
-  const courses = db.prepare(`
-    SELECT c.id, c.code, c.name, c.color,
-           COUNT(DISTINCT e.student_id) AS enrolledStudents,
-           COUNT(DISTINCT s.id) AS totalSessions
-    FROM courses c
-    LEFT JOIN enrollments e ON e.course_id = c.id
-    LEFT JOIN sessions s ON s.course_id = c.id
-    GROUP BY c.id
-    ORDER BY c.code COLLATE NOCASE
-  `).all();
-
-  return { students, sessions, courses };
-};
-
+// Store Methods
 module.exports = {
-  db,
-  transaction,
-  listStudents,
-  getStudent,
-  getStudentByScanId,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-  listCourses,
-  getCourse,
-  createCourse,
-  updateCourse,
-  deleteCourse,
-  enrollStudent,
-  unenrollStudent,
-  listSessions,
-  getSession,
-  createSession,
-  updateSession,
-  deleteSession,
-  getAttendance,
-  upsertAttendance,
-  report,
-};
+  mongoose,
+  Course,
+  Student,
+  Enrollment,
+  Session,
+  Attendance,
 
+  // COURSES
+  async listCourses() {
+    return await Course.find().sort({ createdAt: -1 }).lean();
+  },
+
+  async createCourse({ code, name, description = '', color = '#8b5cf6' }) {
+    const id = uid('crs');
+    const course = new Course({ id, code, name, description, color, createdAt: Date.now() });
+    await course.save();
+    return course.toObject();
+  },
+
+  async updateCourse(id, { code, name, description, color }) {
+    return await Course.findOneAndUpdate({ id }, { code, name, description, color }, { new: true }).lean();
+  },
+
+  async deleteCourse(id) {
+    await Course.deleteOne({ id });
+    await Enrollment.deleteMany({ courseId: id });
+    await Session.updateMany({ courseId: id }, { courseId: '' });
+  },
+
+  // STUDENTS
+  async listStudents() {
+    const students = await Student.find().sort({ createdAt: -1 }).lean();
+    const enrollments = await Enrollment.find().sort({ enrolledAt: -1 }).lean();
+    const courses = await Course.find().lean();
+    const courseMap = new Map(courses.map(c => [c.id, c]));
+
+    const attendances = await Attendance.find().lean();
+    const sessions = await Session.find().lean();
+    const sessionMap = new Map(sessions.map(s => [s.id, s]));
+
+    return students.map(s => {
+      const studentEnrollments = enrollments.filter(e => e.studentId === s.id);
+      const studentCourses = studentEnrollments.map(e => courseMap.get(e.courseId)).filter(Boolean);
+
+      let totalFines = 0;
+      const studentAtt = attendances.filter(a => a.studentId === s.id);
+      studentAtt.forEach(a => {
+        const sess = sessionMap.get(a.sessionId);
+        if (!sess) return;
+        if (a.status === 'late') totalFines += (sess.lateFine || 0);
+        else if (a.status === 'absent') totalFines += (sess.absentFine || 0);
+      });
+
+      return {
+        ...s,
+        courses: studentCourses,
+        totalFines
+      };
+    });
+  },
+
+  async createStudent({ studentId = '', name, email = '', yearLevel = '1st Year', role = 'Student', courseId = '' }) {
+    const id = uid('stu');
+    const student = new Student({ id, studentId, name, email, yearLevel, role, createdAt: Date.now() });
+    await student.save();
+
+    if (courseId) {
+      await Enrollment.updateOne(
+        { courseId, studentId: id },
+        { courseId, studentId: id, enrolledAt: Date.now() },
+        { upsert: true }
+      );
+    }
+    return student.toObject();
+  },
+
+  async updateStudent(id, { studentId, name, email, yearLevel, role, courseId }) {
+    const student = await Student.findOneAndUpdate({ id }, { studentId, name, email, yearLevel, role }, { new: true }).lean();
+    if (courseId) {
+      await Enrollment.deleteOne({ studentId: id });
+      await Enrollment.create({ courseId, studentId: id, enrolledAt: Date.now() });
+    }
+    return student;
+  },
+
+  async deleteStudent(id) {
+    await Student.deleteOne({ id });
+    await Enrollment.deleteMany({ studentId: id });
+    await Attendance.deleteMany({ studentId: id });
+  },
+
+  // SESSIONS
+  async listSessions() {
+    const sessions = await Session.find().sort({ createdAt: -1 }).lean();
+    const courses = await Course.find().lean();
+    const courseMap = new Map(courses.map(c => [c.id, c]));
+
+    const attendances = await Attendance.find().lean();
+
+    return sessions.map(s => {
+      const crs = courseMap.get(s.courseId);
+      const sessAtt = attendances.filter(a => a.sessionId === s.id);
+      const present = sessAtt.filter(a => a.status === 'present').length;
+      const late = sessAtt.filter(a => a.status === 'late').length;
+      const exempted = sessAtt.filter(a => a.status === 'exempted').length;
+      const absent = sessAtt.filter(a => a.status === 'absent').length;
+
+      return {
+        ...s,
+        courseCode: crs ? crs.code : '',
+        courseName: crs ? crs.name : '',
+        courseColor: crs ? crs.color : '#8b5cf6',
+        present,
+        late,
+        exempted,
+        absent
+      };
+    });
+  },
+
+  async createSession({ courseId = '', title, date, startTime = '', endTime = '', room = '', notes = '', exemptRoles = [], lateFine = 0, absentFine = 0 }) {
+    const id = uid('ses');
+    const session = new Session({
+      id, courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine, createdAt: Date.now()
+    });
+    await session.save();
+
+    if (exemptRoles && exemptRoles.length > 0) {
+      const exemptedStudents = await Student.find({ role: { $in: exemptRoles } }).lean();
+      for (const st of exemptedStudents) {
+        await Attendance.updateOne(
+          { sessionId: id, studentId: st.id },
+          { sessionId: id, studentId: st.id, status: 'exempted', scannedAt: Date.now(), excuse: `Auto-exempted (${st.role})` },
+          { upsert: true }
+        );
+      }
+    }
+
+    return session.toObject();
+  },
+
+  async updateSession(id, { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine }) {
+    const session = await Session.findOneAndUpdate(
+      { id },
+      { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine },
+      { new: true }
+    ).lean();
+
+    if (exemptRoles && exemptRoles.length > 0) {
+      const exemptedStudents = await Student.find({ role: { $in: exemptRoles } }).lean();
+      for (const st of exemptedStudents) {
+        await Attendance.updateOne(
+          { sessionId: id, studentId: st.id },
+          { sessionId: id, studentId: st.id, status: 'exempted', scannedAt: Date.now(), excuse: `Auto-exempted (${st.role})` },
+          { upsert: true }
+        );
+      }
+    }
+
+    return session;
+  },
+
+  async deleteSession(id) {
+    await Session.deleteOne({ id });
+    await Attendance.deleteMany({ sessionId: id });
+  },
+
+  // ATTENDANCE
+  async getAttendanceSheet(sessionId) {
+    const session = await Session.findOne({ id: sessionId }).lean();
+    if (!session) return { session: null, records: [] };
+
+    let enrolledStudents = [];
+    if (session.courseId) {
+      const enrollments = await Enrollment.find({ courseId: session.courseId }).lean();
+      const studentIds = enrollments.map(e => e.studentId);
+      enrolledStudents = await Student.find({ id: { $in: studentIds } }).lean();
+    } else {
+      enrolledStudents = await Student.find().lean();
+    }
+
+    const attendances = await Attendance.find({ sessionId }).lean();
+    const attMap = new Map(attendances.map(a => [a.studentId, a]));
+
+    const records = enrolledStudents.map(st => {
+      const att = attMap.get(st.id);
+      return {
+        studentId: st.id,
+        scanId: st.studentId || '',
+        name: st.name,
+        email: st.email || '',
+        yearLevel: st.yearLevel || '1st Year',
+        role: st.role || 'Student',
+        status: att ? att.status : 'unmarked',
+        scannedAt: att ? att.scannedAt : null,
+        excuse: att ? att.excuse || '' : ''
+      };
+    });
+
+    return { session, records };
+  },
+
+  async setAttendanceStatus(sessionId, studentId, status, excuse = '') {
+    await Attendance.updateOne(
+      { sessionId, studentId },
+      { sessionId, studentId, status, scannedAt: Date.now(), excuse },
+      { upsert: true }
+    );
+
+    const student = await Student.findOne({ id: studentId }).lean();
+    return {
+      sessionId,
+      studentId,
+      status,
+      scannedAt: Date.now(),
+      excuse,
+      studentName: student ? student.name : ''
+    };
+  },
+
+  async bulkUpdateAttendance(sessionId, records) {
+    for (const r of records) {
+      await Attendance.updateOne(
+        { sessionId, studentId: r.studentId },
+        { sessionId, studentId: r.studentId, status: r.status, scannedAt: r.scannedAt || Date.now(), excuse: r.excuse || '' },
+        { upsert: true }
+      );
+    }
+  },
+
+  // REPORTS
+  async report() {
+    const sessions = await this.listSessions();
+    const students = await Student.find().lean();
+    const attendances = await Attendance.find().lean();
+
+    const studentReports = students.map(st => {
+      const atts = attendances.filter(a => a.studentId === st.id);
+      const present = atts.filter(a => a.status === 'present').length;
+      const late = atts.filter(a => a.status === 'late').length;
+      const exempted = atts.filter(a => a.status === 'exempted').length;
+      const absent = atts.filter(a => a.status === 'absent').length;
+      const unmarked = Math.max(0, sessions.length - (present + late + exempted + absent));
+
+      let totalFines = 0;
+      const sessionMap = new Map(sessions.map(s => [s.id, s]));
+      atts.forEach(a => {
+        const sess = sessionMap.get(a.sessionId);
+        if (!sess) return;
+        if (a.status === 'late') totalFines += (sess.lateFine || 0);
+        else if (a.status === 'absent') totalFines += (sess.absentFine || 0);
+      });
+
+      return {
+        id: st.id,
+        studentId: st.studentId,
+        name: st.name,
+        yearLevel: st.yearLevel || '1st Year',
+        role: st.role || 'Student',
+        sessions: sessions.length,
+        present,
+        late,
+        exempted,
+        absent,
+        unmarked,
+        totalFines
+      };
+    });
+
+    return { sessions, students: studentReports };
+  }
+};

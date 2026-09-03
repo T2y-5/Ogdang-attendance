@@ -7,7 +7,84 @@ const state = {
   currentSession: '',
   lastScanId: '',
   chartInstance: null,
+  userRole: localStorage.getItem('ogdang_user_role') || 'student', // 'student', 'instructor', 'admin'
 };
+
+function openAuthModal() {
+  document.getElementById('authPasscode').value = '';
+  document.getElementById('authModal').style.display = 'flex';
+  document.getElementById('authPasscode').focus();
+}
+
+function closeAuthModal() {
+  document.getElementById('authModal').style.display = 'none';
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const passcode = document.getElementById('authPasscode').value.trim();
+  if (!passcode) return;
+  try {
+    const res = await post('/api/auth/verify', { passcode });
+    state.userRole = res.role;
+    localStorage.setItem('ogdang_user_role', res.role);
+    toast(`Unlocked as ${res.label}`);
+    closeAuthModal();
+    applyRoleSecurity();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function lockToStudentMode() {
+  state.userRole = 'student';
+  localStorage.setItem('ogdang_user_role', 'student');
+  toast('Locked to Student Mode');
+  closeAuthModal();
+  applyRoleSecurity();
+}
+
+function applyRoleSecurity() {
+  const role = state.userRole || 'student';
+  const roleIcon = document.getElementById('roleIcon');
+  const roleLabel = document.getElementById('roleLabel');
+  const roleBtn = document.getElementById('userRoleBtn');
+
+  if (roleBtn) {
+    if (role === 'admin') {
+      roleBtn.style.background = '#dcfce7';
+      roleBtn.style.color = '#15803d';
+      if (roleIcon) roleIcon.textContent = '🛡️';
+      if (roleLabel) roleLabel.textContent = 'Admin Mode';
+    } else if (role === 'instructor') {
+      roleBtn.style.background = '#f3e8ff';
+      roleBtn.style.color = '#7e22ce';
+      if (roleIcon) roleIcon.textContent = '👨‍🏫';
+      if (roleLabel) roleLabel.textContent = 'Instructor Mode';
+    } else {
+      roleBtn.style.background = '#f3f4f6';
+      roleBtn.style.color = '#374151';
+      if (roleIcon) roleIcon.textContent = '🔒';
+      if (roleLabel) roleLabel.textContent = 'Student Mode';
+    }
+  }
+
+  const isStudent = (role === 'student');
+
+  ['courseForm', 'studentForm', 'sessionForm'].forEach(formId => {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const inputs = form.querySelectorAll('input, select, button');
+    inputs.forEach(el => {
+      el.disabled = isStudent;
+    });
+  });
+
+  const dangerZone = document.querySelector('.danger-zone');
+  if (dangerZone) {
+    dangerZone.style.display = (role === 'admin') ? '' : 'none';
+  }
+}
 
 // ---------- tiny API client ----------
 async function api(path, options = {}) {
@@ -83,6 +160,7 @@ async function loadAll() {
   updateScannerStatus();
   if (state.currentSession) await loadAttendanceSheet();
   updateHero();
+  applyRoleSecurity();
 }
 
 async function loadAttendanceSheet() {
@@ -267,7 +345,7 @@ function renderStudents() {
     return;
   }
   wrap.innerHTML = `<table>
-    <thead><tr><th>Name, Role & Year</th><th>Student ID</th><th>Enrolled Course (Recent & History)</th><th></th></tr></thead>
+    <thead><tr><th>Name, Role & Year</th><th>Student ID</th><th>Enrolled Course</th><th>Total Balance</th><th></th></tr></thead>
     <tbody>${filtered.map(s => {
       const coursesList = s.courses || [];
       const courseBadges = coursesList.map((c, idx) => {
@@ -282,6 +360,11 @@ function renderStudents() {
       const roleTag = (s.role && s.role !== 'Student')
         ? `<span class="role-chip ${roleClass}">${esc(s.role)}</span>`
         : '';
+
+      const fineAmount = Number(s.totalFines || 0);
+      const finePill = fineAmount > 0
+        ? `<span class="pill pill-bad" style="font-weight:700;">₱${fineAmount.toFixed(2)}</span>`
+        : `<span class="pill pill-good" style="opacity:0.8;">₱0.00</span>`;
 
       return `
       <tr>
@@ -300,6 +383,7 @@ function renderStudents() {
         </td>
         <td><span class="mono" style="font-weight:600; color:#374151;">${esc(s.studentId) || '—'}</span></td>
         <td>${courseBadges}</td>
+        <td>${finePill}</td>
         <td><div class="row-actions">
           <button class="btn btn-ghost btn-sm" onclick="editStudent('${s.id}')">Edit / Enroll</button>
           <button class="btn btn-danger btn-sm" onclick="askDeleteStudent('${s.id}')">Delete</button>
@@ -406,6 +490,12 @@ function renderSessions() {
         ? `<div style="margin-top:4px;"><span class="role-chip" style="background:#f3e8ff; color:#7e22ce; font-size:0.68rem; padding:1px 6px;">Exempts: ${esc(exemptRolesList.join(', '))}</span></div>`
         : '';
 
+      const lateFine = Number(s.lateFine || 0);
+      const absentFine = Number(s.absentFine || 0);
+      const fineBadge = (lateFine > 0 || absentFine > 0)
+        ? `<div style="margin-top:4px;"><span class="role-chip" style="background:#fef2f2; color:#dc2626; font-size:0.68rem; padding:1px 6px; border:1px solid #fecaca;">💰 Fine: Late ₱${lateFine.toFixed(2)} | Absent ₱${absentFine.toFixed(2)}</span></div>`
+        : '';
+
       return `
       <tr>
         <td>
@@ -415,6 +505,7 @@ function renderSessions() {
         <td>
           <strong>${esc(s.title)}</strong>
           ${exemptBadge}
+          ${fineBadge}
           ${s.notes ? `<div class="session-notes">${esc(s.notes)}</div>` : ''}
         </td>
         <td>
@@ -443,6 +534,8 @@ document.getElementById('sessionForm').addEventListener('submit', async e => {
   const endTime = document.getElementById('sessionEnd').value;
   const room = document.getElementById('sessionRoom').value.trim();
   const notes = document.getElementById('sessionNotes').value.trim();
+  const lateFine = Number(document.getElementById('sessionLateFine')?.value) || 0;
+  const absentFine = Number(document.getElementById('sessionAbsentFine')?.value) || 0;
 
   const exemptCheckboxes = document.querySelectorAll('input[name="exemptRoles"]:checked');
   const exemptRoles = Array.from(exemptCheckboxes).map(cb => cb.value);
@@ -450,10 +543,10 @@ document.getElementById('sessionForm').addEventListener('submit', async e => {
   if (!title || !date || !startTime || !endTime) return;
   try {
     if (id) {
-      await put(`/api/sessions/${id}`, { courseId, title, date, startTime, endTime, room, notes, exemptRoles });
+      await put(`/api/sessions/${id}`, { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine });
       toast('Event updated');
     } else {
-      await post('/api/sessions', { courseId, title, date, startTime, endTime, room, notes, exemptRoles });
+      await post('/api/sessions', { courseId, title, date, startTime, endTime, room, notes, exemptRoles, lateFine, absentFine });
       toast('Event added');
     }
     resetSessionForm();
@@ -472,6 +565,8 @@ function editSession(id) {
   document.getElementById('sessionEnd').value = s.endTime || '';
   document.getElementById('sessionRoom').value = s.room || '';
   document.getElementById('sessionNotes').value = s.notes || '';
+  if (document.getElementById('sessionLateFine')) document.getElementById('sessionLateFine').value = s.lateFine || 0;
+  if (document.getElementById('sessionAbsentFine')) document.getElementById('sessionAbsentFine').value = s.absentFine || 0;
   
   const exemptRoles = s.exemptRoles || [];
   document.querySelectorAll('input[name="exemptRoles"]').forEach(cb => {
@@ -489,6 +584,8 @@ function resetSessionForm() {
   document.getElementById('sessionForm').reset();
   document.getElementById('sessionId').value = '';
   document.getElementById('sessionCourse').value = '';
+  if (document.getElementById('sessionLateFine')) document.getElementById('sessionLateFine').value = 0;
+  if (document.getElementById('sessionAbsentFine')) document.getElementById('sessionAbsentFine').value = 0;
   document.querySelectorAll('input[name="exemptRoles"]').forEach(cb => cb.checked = false);
   document.getElementById('sessionFormTitle').textContent = 'Add event';
   document.getElementById('sessionSubmitBtn').textContent = 'Add event';
@@ -753,7 +850,7 @@ function renderReports() {
 
   get('/api/report').then(report => {
     // Render Stat Cards Metrics
-    let totalPresent = 0, totalLate = 0, totalExempted = 0;
+    let totalPresent = 0, totalLate = 0, totalExempted = 0, totalFinesAccrued = 0;
     (report.sessions || []).forEach(s => {
       totalPresent += (s.present || 0);
       totalLate += (s.late || 0);
@@ -761,14 +858,16 @@ function renderReports() {
     const totalCheckins = totalPresent + totalLate;
     const punctuality = totalCheckins ? Math.round((totalPresent / totalCheckins) * 100) : 100;
 
-    // Count exemptions across students
+    // Count exemptions & total fines across students
     (report.students || []).forEach(st => {
       totalExempted += (st.exempted || 0);
+      totalFinesAccrued += (Number(st.totalFines) || 0);
     });
 
     if (document.getElementById('repStatCheckins')) document.getElementById('repStatCheckins').textContent = totalCheckins;
     if (document.getElementById('repStatPunctuality')) document.getElementById('repStatPunctuality').textContent = `${punctuality}%`;
     if (document.getElementById('repStatExemptions')) document.getElementById('repStatExemptions').textContent = totalExempted;
+    if (document.getElementById('repStatFines')) document.getElementById('repStatFines').textContent = `₱${totalFinesAccrued.toFixed(2)}`;
 
     // Render Charts
     renderAnalyticsChart(report.sessions);
@@ -780,6 +879,8 @@ function renderReports() {
       const pct = total ? Math.round(((st.present + st.late) / total) * 100) : 0;
       const pill = pct >= 75 ? 'pill-good' : pct >= 40 ? 'pill-warn' : 'pill-bad';
       const label = pct >= 75 ? 'good' : pct >= 40 ? 'warning' : 'low';
+      const fineVal = Number(st.totalFines || 0);
+      const fineText = fineVal > 0 ? `<span class="pill pill-bad" style="font-weight:700;">₱${fineVal.toFixed(2)}</span>` : `<span class="pill pill-good" style="opacity:0.8;">₱0.00</span>`;
       return `
         <tr>
           <td>
@@ -796,10 +897,11 @@ function renderReports() {
           <td>${st.absent}</td>
           <td>${st.unmarked}</td>
           <td><span class="pill ${pill}">${pct}% · ${label}</span></td>
+          <td>${fineText}</td>
         </tr>`;
     }).join('');
     table.innerHTML = `<table>
-      <thead><tr><th>Student</th><th>Present</th><th>Late</th><th>Absent</th><th>Unmarked</th><th>Rate</th></tr></thead>
+      <thead><tr><th>Student</th><th>Present</th><th>Late</th><th>Absent</th><th>Unmarked</th><th>Rate</th><th>Accrued Fines</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   });
 }
