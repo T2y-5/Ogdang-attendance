@@ -1,0 +1,5 @@
+node_modules/
+attendance.db-shm
+attendance.db-wal
+.DS_Store
+*.log

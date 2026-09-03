@@ -1,4 +1,4 @@
-﻿const path = require('path');
+const path = require('path');
 const express = require('express');
 const store = require('./db');
 
@@ -21,11 +21,73 @@ function sessionWindow(session) {
   return { start, end };
 }
 
+// ---------- Courses ----------
+app.get('/api/courses', wrap((req, res) => res.json(store.listCourses())));
+
+app.post('/api/courses', wrap((req, res) => {
+  const { code, name, description, color } = req.body || {};
+  if (!code || !String(code).trim()) return res.status(400).json({ error: 'Course code is required' });
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Course name is required' });
+  
+  const course = {
+    id: uid(),
+    code: String(code).trim().toUpperCase(),
+    name: String(name).trim(),
+    description: String(description || '').trim(),
+    color: String(color || '#8b5cf6').trim(),
+    createdAt: Date.now(),
+  };
+  try {
+    store.createCourse(course);
+    res.status(201).json(course);
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(400).json({ error: 'Course code already exists' });
+    }
+    throw err;
+  }
+}));
+
+app.put('/api/courses/:id', wrap((req, res) => {
+  const existing = store.getCourse(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Course not found' });
+  const { code, name, description, color } = req.body || {};
+  if (!code || !String(code).trim()) return res.status(400).json({ error: 'Course code is required' });
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Course name is required' });
+  
+  store.updateCourse({
+    id: req.params.id,
+    code: String(code).trim().toUpperCase(),
+    name: String(name).trim(),
+    description: String(description || '').trim(),
+    color: String(color || '#8b5cf6').trim(),
+  });
+  res.json(store.getCourse(req.params.id));
+}));
+
+app.delete('/api/courses/:id', wrap((req, res) => {
+  const result = store.deleteCourse(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Course not found' });
+  res.status(204).end();
+}));
+
+app.post('/api/courses/:id/enroll', wrap((req, res) => {
+  const { studentId } = req.body || {};
+  if (!studentId) return res.status(400).json({ error: 'studentId is required' });
+  store.enrollStudent(req.params.id, studentId);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/courses/:id/unenroll/:studentId', wrap((req, res) => {
+  store.unenrollStudent(req.params.id, req.params.studentId);
+  res.status(204).end();
+}));
+
 // ---------- Students ----------
 app.get('/api/students', wrap((req, res) => res.json(store.listStudents())));
 
 app.post('/api/students', wrap((req, res) => {
-  const { studentId, name, email } = req.body || {};
+  const { studentId, name, email, yearLevel, role, courses } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
   if (!studentId || !String(studentId).trim()) return res.status(400).json({ error: 'Student ID is required' });
   if (store.getStudentByScanId(String(studentId).trim())) {
@@ -36,23 +98,45 @@ app.post('/api/students', wrap((req, res) => {
     studentId: String(studentId).trim(),
     name: String(name).trim(),
     email: String(email || '').trim(),
+    yearLevel: String(yearLevel || '1st Year').trim(),
+    role: String(role || 'Student').trim(),
     createdAt: Date.now(),
   };
   store.createStudent(student);
-  res.status(201).json(student);
+  if (Array.isArray(courses)) {
+    for (const cId of courses) {
+      store.enrollStudent(cId, student.id);
+    }
+  }
+  res.status(201).json(store.getStudent(student.id));
 }));
 
 app.put('/api/students/:id', wrap((req, res) => {
   const existing = store.getStudent(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Student not found' });
-  const { studentId, name, email } = req.body || {};
+  const { studentId, name, email, yearLevel, role, courses } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
   if (!studentId || !String(studentId).trim()) return res.status(400).json({ error: 'Student ID is required' });
   const clash = store.getStudentByScanId(String(studentId).trim());
   if (clash && clash.id !== existing.id) {
     return res.status(400).json({ error: 'That student ID is already in use' });
   }
-  store.updateStudent({ id: req.params.id, studentId: String(studentId).trim(), name: String(name).trim(), email: String(email || '').trim() });
+  store.updateStudent({
+    id: req.params.id,
+    studentId: String(studentId).trim(),
+    name: String(name).trim(),
+    email: String(email || '').trim(),
+    yearLevel: String(yearLevel || '1st Year').trim(),
+    role: String(role || 'Student').trim()
+  });
+  if (Array.isArray(courses)) {
+    const existingIds = (existing.courses || []).map(c => c.id);
+    for (const cId of courses) {
+      if (!existingIds.includes(cId)) {
+        store.enrollStudent(cId, req.params.id);
+      }
+    }
+  }
   res.json(store.getStudent(req.params.id));
 }));
 
@@ -66,17 +150,20 @@ app.delete('/api/students/:id', wrap((req, res) => {
 app.get('/api/sessions', wrap((req, res) => res.json(store.listSessions())));
 
 app.post('/api/sessions', wrap((req, res) => {
-  const { title, date, startTime, endTime, notes } = req.body || {};
+  const { courseId, title, date, startTime, endTime, room, notes, exemptRoles } = req.body || {};
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
   if (!date) return res.status(400).json({ error: 'Date is required' });
   if (!startTime || !endTime) return res.status(400).json({ error: 'Start and end time are required' });
   const session = {
     id: uid(),
+    courseId: courseId || '',
     title: String(title).trim(),
     date,
     startTime: String(startTime).trim(),
     endTime: String(endTime).trim(),
+    room: String(room || '').trim(),
     notes: String(notes || '').trim(),
+    exemptRoles: Array.isArray(exemptRoles) ? exemptRoles : [],
     createdAt: Date.now(),
   };
   store.createSession(session);
@@ -86,17 +173,20 @@ app.post('/api/sessions', wrap((req, res) => {
 app.put('/api/sessions/:id', wrap((req, res) => {
   const existing = store.getSession(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Event not found' });
-  const { title, date, startTime, endTime, notes } = req.body || {};
+  const { courseId, title, date, startTime, endTime, room, notes, exemptRoles } = req.body || {};
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
   if (!date) return res.status(400).json({ error: 'Date is required' });
   if (!startTime || !endTime) return res.status(400).json({ error: 'Start and end time are required' });
   store.updateSession({
     id: req.params.id,
+    courseId: courseId || '',
     title: String(title).trim(),
     date,
     startTime: String(startTime).trim(),
     endTime: String(endTime).trim(),
+    room: String(room || '').trim(),
     notes: String(notes || '').trim(),
+    exemptRoles: Array.isArray(exemptRoles) ? exemptRoles : [],
   });
   res.json(store.getSession(req.params.id));
 }));
@@ -105,6 +195,32 @@ app.delete('/api/sessions/:id', wrap((req, res) => {
   const result = store.deleteSession(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Event not found' });
   res.status(204).end();
+}));
+
+// Export Session Attendance CSV
+app.get('/api/sessions/:id/csv', wrap((req, res) => {
+  const session = store.getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Event not found' });
+  
+  const records = store.getAttendance(req.params.id);
+  const studentMap = {};
+  records.forEach(r => { studentMap[r.studentId] = r; });
+
+  const allStudents = store.listStudents();
+  
+  const lines = ['"Student Name","Student ID","Status","Excuse","Scanned At"'];
+  for (const s of allStudents) {
+    const rec = studentMap[s.id] || {};
+    const status = rec.status || 'unmarked';
+    const excuse = (rec.excuse || '').replace(/"/g, '""');
+    const scannedAt = rec.scannedAt ? new Date(rec.scannedAt).toLocaleString() : '';
+    lines.push(`"${s.name.replace(/"/g, '""')}","${(s.studentId || '').replace(/"/g, '""')}","${status}","${excuse}","${scannedAt}"`);
+  }
+
+  const filename = `${session.title.replace(/[^a-z0-9_-]/gi, '_')}_${session.date}_attendance.csv`;
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(lines.join('\n'));
 }));
 
 // ---------- Attendance ----------
@@ -116,20 +232,21 @@ app.get('/api/sessions/:id/attendance', wrap((req, res) => {
 app.put('/api/sessions/:id/attendance', wrap((req, res) => {
   if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Event not found' });
   const entries = req.body || [];
-  if (!Array.isArray(entries)) return res.status(400).json({ error: 'Expected an array of {studentId, status}' });
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'Expected an array of {studentId, status, excuse}' });
 
   store.transaction(() => {
     for (const e of entries) {
       if (!e || !e.studentId) continue;
-      const status = ['present', 'absent', 'unmarked'].includes(e.status) ? e.status : 'unmarked';
-      store.upsertAttendance.run(req.params.id, e.studentId, status, null);
+      const status = ['present', 'late', 'exempted', 'absent', 'unmarked'].includes(e.status) ? e.status : 'unmarked';
+      const excuse = String(e.excuse || '').trim();
+      store.upsertAttendance.run(req.params.id, e.studentId, status, null, excuse);
     }
   });
 
   res.json(store.getAttendance(req.params.id));
 }));
 
-// ID card scan â€” only works inside the session's time window
+// ID card scan — only works inside the session's time window
 app.post('/api/sessions/:id/scan', wrap((req, res) => {
   const session = store.getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Event not found' });
@@ -157,9 +274,14 @@ app.post('/api/sessions/:id/scan', wrap((req, res) => {
     });
   }
 
-  store.upsertAttendance.run(session.id, student.id, 'present', now.getTime());
+  // Calculate if student is late (e.g., scanned after 15 minutes into session)
+  const diffMinutes = (now - start) / (1000 * 60);
+  const status = diffMinutes > 15 ? 'late' : 'present';
+
+  store.upsertAttendance.run(session.id, student.id, status, now.getTime(), '');
   res.json({
     ok: true,
+    status,
     student: { name: student.name, studentId: student.studentId },
     time: now.toISOString(),
     window: windowInfo,
@@ -172,36 +294,48 @@ app.get('/api/report', wrap((req, res) => res.json(store.report())));
 // ---------- Backup / Import / Reset ----------
 app.get('/api/backup', wrap((req, res) => {
   res.json({
+    courses: store.listCourses(),
     students: store.listStudents(),
-    sessions: store.listSessions().map(({ marked, present, ...s }) => s),
-    attendance: store.db.prepare('SELECT session_id AS sessionId, student_id AS studentId, status, scanned_at AS scannedAt FROM attendance').all(),
+    sessions: store.listSessions().map(({ marked, present, late, ...s }) => s),
+    enrollments: store.db.prepare('SELECT course_id AS courseId, student_id AS studentId FROM enrollments').all(),
+    attendance: store.db.prepare('SELECT session_id AS sessionId, student_id AS studentId, status, scanned_at AS scannedAt, excuse FROM attendance').all(),
   });
 }));
 
 app.post('/api/import', wrap((req, res) => {
-  const { students = [], sessions = [], attendance = [] } = req.body || {};
+  const { courses = [], students = [], sessions = [], enrollments = [], attendance = [] } = req.body || {};
   if (!Array.isArray(students) || !Array.isArray(sessions) || !Array.isArray(attendance)) {
     return res.status(400).json({ error: 'Invalid backup format' });
   }
 
   store.transaction(() => {
-    store.db.exec('DELETE FROM attendance; DELETE FROM sessions; DELETE FROM students;');
+    store.db.exec('DELETE FROM attendance; DELETE FROM enrollments; DELETE FROM sessions; DELETE FROM students; DELETE FROM courses;');
+    const insC = store.db.prepare('INSERT INTO courses (id, code, name, description, color, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     const insS = store.db.prepare('INSERT INTO students (id, student_id, name, email, created_at) VALUES (?, ?, ?, ?, ?)');
-    const insX = store.db.prepare('INSERT INTO sessions (id, title, date, start_time, end_time, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    const insA = store.db.prepare('INSERT INTO attendance (session_id, student_id, status, scanned_at) VALUES (?, ?, ?, ?)');
+    const insE = store.db.prepare('INSERT INTO enrollments (course_id, student_id) VALUES (?, ?)');
+    const insX = store.db.prepare('INSERT INTO sessions (id, course_id, title, date, start_time, end_time, room, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insA = store.db.prepare('INSERT INTO attendance (session_id, student_id, status, scanned_at, excuse) VALUES (?, ?, ?, ?, ?)');
 
+    for (const c of courses) {
+      if (!c || !c.id || !c.code || !c.name) continue;
+      insC.run(c.id, c.code, c.name, c.description || '', c.color || '#8b5cf6', c.createdAt || Date.now());
+    }
     for (const s of students) {
       if (!s || !s.id || !s.name) continue;
       insS.run(s.id, s.studentId || '', s.name, s.email || '', s.createdAt || Date.now());
     }
+    for (const e of enrollments) {
+      if (!e || !e.courseId || !e.studentId) continue;
+      insE.run(e.courseId, e.studentId);
+    }
     for (const x of sessions) {
       if (!x || !x.id || !x.title || !x.date) continue;
-      insX.run(x.id, x.title, x.date, x.startTime || '', x.endTime || '', x.notes || '', x.createdAt || Date.now());
+      insX.run(x.id, x.courseId || '', x.title, x.date, x.startTime || '', x.endTime || '', x.room || '', x.notes || '', x.createdAt || Date.now());
     }
     for (const a of attendance) {
       if (!a || !a.sessionId || !a.studentId) continue;
-      const status = ['present', 'absent', 'unmarked'].includes(a.status) ? a.status : 'unmarked';
-      insA.run(a.sessionId, a.studentId, status, a.scannedAt || null);
+      const status = ['present', 'late', 'absent', 'unmarked'].includes(a.status) ? a.status : 'unmarked';
+      insA.run(a.sessionId, a.studentId, status, a.scannedAt || null, a.excuse || '');
     }
   });
 
@@ -209,7 +343,7 @@ app.post('/api/import', wrap((req, res) => {
 }));
 
 app.post('/api/reset', wrap((req, res) => {
-  store.db.exec('DELETE FROM attendance; DELETE FROM sessions; DELETE FROM students;');
+  store.db.exec('DELETE FROM attendance; DELETE FROM enrollments; DELETE FROM sessions; DELETE FROM students; DELETE FROM courses;');
   res.json({ ok: true });
 }));
 

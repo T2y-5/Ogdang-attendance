@@ -59,7 +59,21 @@ body {
 .tab:hover { color: var(--text); background: #f3f4f6; }
 .tab.active { color: var(--primary); background: var(--primary-soft); }
 
-.topbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.live-clock {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700; font-size: 0.85rem; color: #1e293b; cursor: pointer;
+  user-select: none; transition: background 0.15s, border-color 0.15s;
+}
+.live-clock:hover { background: #f1f5f9; border-color: var(--primary); }
+.clock-icon { font-size: 0.85rem; }
+.clock-badge {
+  font-size: 0.68rem; font-weight: 800; padding: 1px 5px; border-radius: 4px;
+  background: var(--primary-soft); color: var(--primary); border: 1px solid #c7d2fe;
+}
 
 /* ---------- buttons ---------- */
 .btn {
@@ -263,7 +277,97 @@ tbody tr:hover { background: #f9fafb; }
 .pill { padding: 2px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 600; }
 .pill-good { background: var(--success-soft); color: var(--success); }
 .pill-warn { background: var(--warning-soft); color: var(--warning); }
+.pill-late { background: #fef3c7; color: #d97706; }
 .pill-bad { background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- Course Badges & Color Picker ---------- */
+.color-picker-row {
+  display: flex; gap: 8px; align-items: center; margin-top: 6px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.color-dot {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; transition: transform 0.15s, border-color 0.15s; outline: none;
+}
+.color-dot:hover { transform: scale(1.1); }
+.color-dot.active { border-color: #111827; transform: scale(1.15); box-shadow: 0 0 0 2px #fff inset; }
+
+.course-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: 6px; font-weight: 700; font-size: 0.74rem; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+  white-space: nowrap;
+}
+
+.course-badge.shifted {
+  opacity: 0.65; border: 1px dashed rgba(0,0,0,0.3); font-weight: 600;
+}
+
+.recent-tag {
+  background: #3b82f6; color: #fff; font-size: 0.65rem; font-weight: 800;
+  padding: 1px 5px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.year-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  background: #eef2ff; color: #4338ca; font-size: 0.76rem; font-weight: 700;
+  border: 1px solid #c7d2fe; white-space: nowrap;
+}
+
+.role-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  background: #fdf2f8; color: #db2777; font-size: 0.76rem; font-weight: 700;
+  border: 1px solid #fbcfe8; white-space: nowrap;
+}
+
+.role-chip.athlete { background: #fff7ed; color: #ea580c; border-color: #ffedd5; }
+.role-chip.officer { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+.role-chip.performer { background: #faf5ff; color: #9333ea; border-color: #e9d5ff; }
+
+.pill-exempt {
+  background: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe;
+}
+
+.btn-exempt.active, .status-btn[data-val="exempted"].active {
+  background: #9333ea; color: #fff; border-color: #7e22ce;
+}
+
+.checkbox-group-box {
+  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 12px;
+}
+
+.checkbox-item {
+  display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;
+}
+
+/* ---------- Search Box & Header Actions ---------- */
+.search-box input {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 0.84rem; width: 220px; background: #fff; color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search-box input:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.header-actions-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+
+/* ---------- Roster Seg & Excuse Input ---------- */
+.seg button[data-v="late"].on {
+  background: #fef3c7; color: #b45309; border-color: #fde68a;
+}
+
+.excuse-input {
+  width: 100%; max-width: 200px; padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--border); font-size: 0.8rem; background: #fff;
+  transition: border-color 0.15s;
+}
+.excuse-input:focus {
+  outline: none; border-color: var(--primary); background: #fafafa;
+}
 
 /* ---------- danger zone ---------- */
 .danger-zone {

@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -25,13 +26,19 @@
     </div>
 
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="students">Students</button>
+      <button class="tab active" data-tab="courses">Courses</button>
+      <button class="tab" data-tab="students">Students</button>
       <button class="tab" data-tab="sessions">Events</button>
       <button class="tab" data-tab="attendance">Scanner</button>
       <button class="tab" data-tab="reports">Reports</button>
     </nav>
 
     <div class="topbar-actions">
+      <div class="live-clock" id="liveClock" onclick="toggleClockFormat()" title="Click to toggle 12H / 24H time format">
+        <span class="clock-icon">🕒</span>
+        <span id="clockTime">00:00:00 AM</span>
+        <span class="clock-badge" id="clockMode">12H</span>
+      </div>
       <button class="btn btn-ghost btn-sm" onclick="exportData()" title="Download a JSON backup">Backup</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()" title="Restore from a JSON backup">Restore</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
@@ -43,10 +50,14 @@
   <section class="hero">
     <div class="hero-copy">
       <p class="kicker" id="heroKicker"></p>
-      <h1>Attendance overview</h1>
-      <p class="hero-sub">Students check in by scanning their ID during the event time window.</p>
+      <h1>Attendance Overview</h1>
+      <p class="hero-sub">Manage courses, record student check-ins, and track attendance analytics.</p>
     </div>
     <div class="hero-stats">
+      <div class="stat">
+        <span class="stat-num" id="statCourses">0</span>
+        <span class="stat-label">Courses</span>
+      </div>
       <div class="stat">
         <span class="stat-num" id="statStudents">0</span>
         <span class="stat-label">Students</span>
@@ -57,13 +68,53 @@
       </div>
       <div class="stat">
         <span class="stat-num" id="statRate">0%</span>
-        <span class="stat-label">Overall attendance</span>
+        <span class="stat-label">Overall Rate</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COURSES ============ -->
+  <section id="tab-courses" class="view active">
+    <div class="layout">
+      <div class="panel form-panel">
+        <div class="panel-head">
+          <h2 id="courseFormTitle">Add Course</h2>
+        </div>
+        <form id="courseForm" class="form">
+          <input type="hidden" id="courseId">
+          <label for="courseCode">Course Code</label>
+          <input type="text" id="courseCode" placeholder="e.g. CS101" autocomplete="off" required>
+          <label for="courseName">Course Name</label>
+          <input type="text" id="courseName" placeholder="e.g. Intro to Computer Science" autocomplete="off" required>
+          <label for="courseDescription">Description <span class="opt">(optional)</span></label>
+          <input type="text" id="courseDescription" placeholder="e.g. Fundamental algorithms & programming concepts">
+          <label>Badge Color</label>
+          <div class="color-picker-row" id="colorPickerRow">
+            <button type="button" class="color-dot active" data-color="#8b5cf6" style="background:#8b5cf6"></button>
+            <button type="button" class="color-dot" data-color="#3b82f6" style="background:#3b82f6"></button>
+            <button type="button" class="color-dot" data-color="#10b981" style="background:#10b981"></button>
+            <button type="button" class="color-dot" data-color="#f59e0b" style="background:#f59e0b"></button>
+            <button type="button" class="color-dot" data-color="#ef4444" style="background:#ef4444"></button>
+            <button type="button" class="color-dot" data-color="#ec4899" style="background:#ec4899"></button>
+            <button type="button" class="color-dot" data-color="#06b6d4" style="background:#06b6d4"></button>
+            <input type="hidden" id="courseColor" value="#8b5cf6">
+          </div>
+          <button class="btn btn-primary btn-block" type="submit" id="courseSubmitBtn">Add Course</button>
+          <button class="btn btn-ghost btn-block" id="cancelCourseBtn" type="button" style="display:none" onclick="resetCourseForm()">Cancel Edit</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Courses <span class="count-chip" id="courseCount">0</span></h2>
+        </div>
+        <div id="courseList" class="list-wrap"></div>
       </div>
     </div>
   </section>
 
   <!-- ============ STUDENTS ============ -->
-  <section id="tab-students" class="view active">
+  <section id="tab-students" class="view">
     <div class="layout">
       <div class="panel form-panel">
         <div class="panel-head">
@@ -77,14 +128,43 @@
           <input type="text" id="studentName" placeholder="e.g. Maya Kapoor" autocomplete="off" required>
           <label for="studentEmail">Email <span class="opt">(optional)</span></label>
           <input type="email" id="studentEmail" placeholder="e.g. maya@school.edu" autocomplete="off">
+          <label for="studentYear">Year Level</label>
+          <div class="picker-wrap">
+            <select id="studentYear">
+              <option value="1st Year">1st Year</option>
+              <option value="2nd Year">2nd Year</option>
+              <option value="3rd Year">3rd Year</option>
+              <option value="4th Year">4th Year</option>
+              <option value="5th Year">5th Year</option>
+              <option value="Graduate">Graduate</option>
+            </select>
+          </div>
+          <label for="studentRole">Special Role / Status</label>
+          <div class="picker-wrap">
+            <select id="studentRole">
+              <option value="Student">Regular Student</option>
+              <option value="Athlete">Athlete (Exemptable)</option>
+              <option value="Officer">Student Officer</option>
+              <option value="Performer">Performer / Cultural</option>
+            </select>
+          </div>
+          <label for="studentCourseSelect">Assigned Course (Single Course)</label>
+          <div class="picker-wrap">
+            <select id="studentCourseSelect">
+              <option value="">-- No Course Enrolled --</option>
+            </select>
+          </div>
           <button class="btn btn-primary btn-block" type="submit" id="studentSubmitBtn">Add student</button>
           <button class="btn btn-ghost btn-block" id="cancelStudentBtn" type="button" style="display:none" onclick="resetStudentForm()">Cancel edit</button>
         </form>
       </div>
 
       <div class="panel">
-        <div class="panel-head">
+        <div class="panel-head panel-head-split">
           <h2>Students <span class="count-chip" id="studentCount">0</span></h2>
+          <div class="search-box">
+            <input type="text" id="studentSearch" placeholder="Search student name or ID..." oninput="renderStudents()">
+          </div>
         </div>
         <div id="studentList" class="list-wrap"></div>
       </div>
@@ -100,8 +180,12 @@
         </div>
         <form id="sessionForm" class="form">
           <input type="hidden" id="sessionId">
+          <label for="sessionCourse">Course <span class="opt">(optional)</span></label>
+          <select id="sessionCourse">
+            <option value="">General Event (No course)</option>
+          </select>
           <label for="sessionTitle">Title</label>
-          <input type="text" id="sessionTitle" placeholder="e.g. Christmas Party" autocomplete="off" required>
+          <input type="text" id="sessionTitle" placeholder="e.g. Christmas Party / Lecture 1" autocomplete="off" required>
           <label for="sessionDate">Date</label>
           <input type="date" id="sessionDate" required>
           <div class="time-pair">
@@ -114,16 +198,30 @@
               <input type="time" id="sessionEnd" required>
             </div>
           </div>
+          <label for="sessionRoom">Location / Room <span class="opt">(optional)</span></label>
+          <input type="text" id="sessionRoom" placeholder="e.g. Hall A-102">
           <label for="sessionNotes">Notes <span class="opt">(optional)</span></label>
-          <input type="text" id="sessionNotes" placeholder="e.g. Main Hall, 5th floor">
+          <input type="text" id="sessionNotes" placeholder="e.g. Bring student ID cards">
+          <label>Auto-Exempt Roles <span class="opt">(optional)</span></label>
+          <div class="checkbox-group-box" style="margin-bottom:12px;">
+            <p class="meta">Roles automatically marked as Exempted:</p>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
+              <label class="checkbox-item"><input type="checkbox" name="exemptRoles" value="Athlete"> <span class="role-chip athlete">Athlete</span></label>
+              <label class="checkbox-item"><input type="checkbox" name="exemptRoles" value="Officer"> <span class="role-chip officer">Officer</span></label>
+              <label class="checkbox-item"><input type="checkbox" name="exemptRoles" value="Performer"> <span class="role-chip performer">Performer</span></label>
+            </div>
+          </div>
           <button class="btn btn-primary btn-block" type="submit" id="sessionSubmitBtn">Add event</button>
           <button class="btn btn-ghost btn-block" id="cancelSessionBtn" type="button" style="display:none" onclick="resetSessionForm()">Cancel edit</button>
         </form>
       </div>
 
       <div class="panel">
-        <div class="panel-head">
+        <div class="panel-head panel-head-split">
           <h2>Events <span class="count-chip" id="sessionCount">0</span></h2>
+          <div class="search-box">
+            <input type="text" id="sessionSearch" placeholder="Search event title..." oninput="renderSessions()">
+          </div>
         </div>
         <div id="sessionList" class="list-wrap"></div>
       </div>
@@ -143,7 +241,7 @@
 
       <div class="scanner-status">
         <div class="clock-row">
-          <span class="live-clock" id="liveClock">--:--:--</span>
+          <span class="live-clock" id="scannerLiveClock">--:--:--</span>
           <span class="window-time" id="windowTime"></span>
           <span class="pill pill-warn" id="windowBadge">Select an event</span>
         </div>
@@ -162,10 +260,15 @@
     <div class="panel">
       <div class="panel-head panel-head-split">
         <h2>Event roster</h2>
-        <div class="mini-counts">
-          <span class="pill pill-good" id="miniPresent">0 present</span>
-          <span class="pill pill-bad" id="miniAbsent">0 absent</span>
-          <span class="pill" id="miniUnmarked">0 unmarked</span>
+        <div class="header-actions-row">
+          <div class="mini-counts">
+            <span class="pill pill-good" id="miniPresent">0 present</span>
+            <span class="pill pill-late" id="miniLate">0 late</span>
+            <span class="pill pill-exempt" id="miniExempted">0 exempted</span>
+            <span class="pill pill-bad" id="miniAbsent">0 absent</span>
+            <span class="pill" id="miniUnmarked">0 unmarked</span>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="downloadCSV()" title="Export CSV for this event">Export CSV</button>
         </div>
       </div>
       <div id="attendanceSheet" class="list-wrap"></div>
@@ -173,21 +276,78 @@
         <button class="btn btn-outline btn-sm" onclick="bulkMark('present')">Mark everyone present</button>
         <button class="btn btn-outline btn-sm" onclick="bulkMark('unmarked')">Reset all marks</button>
       </div>
-      <p class="panel-note">Corrections below bypass the time window. Check-ins via the scanner are time-stamped.</p>
+      <p class="panel-note">Corrections below bypass the time window. Check-ins via scanner log timestamps.</p>
     </div>
   </section>
 
   <!-- ============ REPORTS ============ -->
   <section id="tab-reports" class="view">
+    <!-- Key Analytics Metrics Row -->
+    <div class="metrics-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:16px;">
+      <div class="panel stat-card" style="padding:14px;">
+        <div class="meta">Total Check-Ins</div>
+        <div class="stat-value" id="repStatCheckins" style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:4px;">0</div>
+        <div class="scan-meta" style="margin-top:2px;">Present + Late Scans</div>
+      </div>
+      <div class="panel stat-card" style="padding:14px;">
+        <div class="meta">Punctuality Rate</div>
+        <div class="stat-value" id="repStatPunctuality" style="font-size:1.6rem; font-weight:800; color:#10b981; margin-top:4px;">0%</div>
+        <div class="scan-meta" style="margin-top:2px;">On-Time Arrival Ratio</div>
+      </div>
+      <div class="panel stat-card" style="padding:14px;">
+        <div class="meta">Top Attending Course</div>
+        <div class="stat-value" id="repStatTopCourse" style="font-size:1.2rem; font-weight:700; color:#4f46e5; margin-top:6px;">—</div>
+        <div class="scan-meta" style="margin-top:2px;">Most Active Enrolled Course</div>
+      </div>
+      <div class="panel stat-card" style="padding:14px;">
+        <div class="meta">Total Exemptions</div>
+        <div class="stat-value" id="repStatExemptions" style="font-size:1.6rem; font-weight:800; color:#7e22ce; margin-top:4px;">0</div>
+        <div class="scan-meta" style="margin-top:2px;">Athletes & Officers Exempted</div>
+      </div>
+    </div>
+
+    <!-- Analytics Charts Grid -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; margin-bottom:16px;">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Course Attendance Distribution</h2>
+        </div>
+        <p class="panel-note" style="margin-bottom:10px;">Check-ins proportion across courses</p>
+        <div class="chart-container" style="position: relative; height: 260px; padding: 10px;">
+          <canvas id="coursePieChart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Event Attendance Overview</h2>
+        </div>
+        <p class="panel-note" style="margin-bottom:10px;">Status distribution per scheduled event</p>
+        <div class="chart-container" style="position: relative; height: 260px; padding: 10px;">
+          <canvas id="attendanceChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head">
+        <h2>Year Level Distribution</h2>
+      </div>
+      <div class="chart-container" style="position: relative; height: 240px; padding: 10px;">
+        <canvas id="yearChart"></canvas>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-head">
-        <h2>Attendance summary</h2>
+        <h2>Event Attendance Summary</h2>
       </div>
       <div id="reportSummary" class="report-summary"></div>
     </div>
+
     <div class="panel">
       <div class="panel-head">
-        <h2>Student breakdown</h2>
+        <h2>Student Attendance Ledger</h2>
       </div>
       <div id="reportTable" class="list-wrap"></div>
     </div>
