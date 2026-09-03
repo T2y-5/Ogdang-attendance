@@ -3,7 +3,7 @@ const state = {
   students: [],
   sessions: [],
   attendance: {},   // { studentId: { status, scannedAt, checkOutAt, excuse } }
-  activeTab: 'courses',
+  activeTab: localStorage.getItem('ogdang_active_tab') || 'courses',
   currentSession: '',
   lastScanId: '',
   scanMode: 'check-in', // 'check-in' or 'check-out'
@@ -187,6 +187,7 @@ async function loadAll() {
   if (state.currentSession) await loadAttendanceSheet();
   updateHero();
   applyRoleSecurity();
+  switchTab(state.activeTab || 'courses');
 }
 
 async function loadAttendanceSheet() {
@@ -1131,14 +1132,16 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 function switchTab(name) {
+  if (!name) return;
   state.activeTab = name;
+  localStorage.setItem('ogdang_active_tab', name);
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'tab-' + name));
   if (name === 'reports') renderReports();
   if (name === 'attendance') {
     updateScannerStatus();
     const input = document.getElementById('scanInput');
-    if (!input.disabled) input.focus();
+    if (input && !input.disabled) input.focus();
   }
 }
 
