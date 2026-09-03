@@ -174,11 +174,12 @@ app.get('/api/sessions/:id/csv', wrap(async (req, res) => {
   const { session, records } = await store.getAttendanceSheet(req.params.id);
   if (!session) return res.status(404).json({ error: 'Event not found' });
 
-  const lines = ['"Student Name","Student ID","Status","Excuse","Scanned At"'];
+  const lines = ['"Student Name","Student ID","Status","Excuse","Time-In","Time-Out"'];
   for (const r of records) {
     const excuse = (r.excuse || '').replace(/"/g, '""');
     const scannedAt = r.scannedAt ? new Date(r.scannedAt).toLocaleString() : '';
-    lines.push(`"${r.name.replace(/"/g, '""')}","${(r.scanId || '').replace(/"/g, '""')}","${r.status}","${excuse}","${scannedAt}"`);
+    const checkOutAt = r.checkOutAt ? new Date(r.checkOutAt).toLocaleString() : '';
+    lines.push(`"${r.name.replace(/"/g, '""')}","${(r.scanId || '').replace(/"/g, '""')}","${r.status}","${excuse}","${scannedAt}","${checkOutAt}"`);
   }
 
   const filename = `${session.title.replace(/[^a-z0-9_-]/gi, '_')}_${session.date}_attendance.csv`;
@@ -203,12 +204,12 @@ app.put('/api/sessions/:id/attendance', wrap(async (req, res) => {
   res.json(updated);
 }));
 
-// ID card scan endpoint
+// ID card scan endpoint (Check-In & Check-Out)
 app.post('/api/sessions/:id/scan', wrap(async (req, res) => {
   const session = await store.Session.findOne({ id: req.params.id }).lean();
   if (!session) return res.status(404).json({ error: 'Event not found' });
 
-  const { scanId } = req.body || {};
+  const { scanId, mode = 'check-in' } = req.body || {};
   if (!scanId || !String(scanId).trim()) return res.status(400).json({ error: 'No student ID detected' });
 
   const student = await store.Student.findOne({ studentId: String(scanId).trim() }).lean();
@@ -231,17 +232,29 @@ app.post('/api/sessions/:id/scan', wrap(async (req, res) => {
     });
   }
 
-  const diffMinutes = (now - start) / (1000 * 60);
-  const status = diffMinutes > 15 ? 'late' : 'present';
-
-  const result = await store.setAttendanceStatus(session.id, student.id, status, '');
-  res.json({
-    ok: true,
-    status,
-    student: { name: student.name, studentId: student.studentId },
-    time: now.toISOString(),
-    window: windowInfo,
-  });
+  if (mode === 'check-out') {
+    const result = await store.setCheckOutStatus(session.id, student.id);
+    return res.json({
+      ok: true,
+      mode: 'check-out',
+      status: result.status,
+      student: { name: student.name, studentId: student.studentId },
+      time: now.toISOString(),
+      window: windowInfo,
+    });
+  } else {
+    const diffMinutes = (now - start) / (1000 * 60);
+    const status = diffMinutes > 15 ? 'late' : 'present';
+    const result = await store.setAttendanceStatus(session.id, student.id, status, '', now.getTime());
+    return res.json({
+      ok: true,
+      mode: 'check-in',
+      status,
+      student: { name: student.name, studentId: student.studentId },
+      time: now.toISOString(),
+      window: windowInfo,
+    });
+  }
 }));
 
 // ---------- Reports ----------

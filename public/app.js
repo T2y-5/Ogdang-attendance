@@ -2,10 +2,11 @@ const state = {
   courses: [],
   students: [],
   sessions: [],
-  attendance: {},   // { studentId: { status, scannedAt, excuse } }
+  attendance: {},   // { studentId: { status, scannedAt, checkOutAt, excuse } }
   activeTab: 'courses',
   currentSession: '',
   lastScanId: '',
+  scanMode: 'check-in', // 'check-in' or 'check-out'
   chartInstance: null,
   userRole: localStorage.getItem('ogdang_user_role') || 'student', // 'student', 'instructor', 'admin'
 };
@@ -201,10 +202,29 @@ async function loadAttendanceSheet() {
   const rows = Array.isArray(res) ? res : (res && Array.isArray(res.records) ? res.records : []);
   state.attendance = {};
   rows.forEach(r => {
-    state.attendance[r.studentId] = { status: r.status, scannedAt: r.scannedAt, excuse: r.excuse || '' };
+    state.attendance[r.studentId] = { status: r.status, scannedAt: r.scannedAt, checkOutAt: r.checkOutAt || null, excuse: r.excuse || '' };
   });
   renderSheet();
   updateScannerStatus();
+}
+
+function setScanMode(mode) {
+  state.scanMode = mode;
+  const btnIn = document.getElementById('btnScanCheckIn');
+  const btnOut = document.getElementById('btnScanCheckOut');
+  const submitBtn = document.getElementById('scanSubmitBtn');
+
+  if (mode === 'check-out') {
+    if (btnIn) { btnIn.style.background = '#f3f4f6'; btnIn.style.color = '#374151'; btnIn.classList.remove('active'); }
+    if (btnOut) { btnOut.style.background = '#ef4444'; btnOut.style.color = '#fff'; btnOut.classList.add('active'); }
+    if (submitBtn) { submitBtn.textContent = 'Check-Out (Time-Out)'; submitBtn.style.background = '#ef4444'; }
+    toast('Scanner set to Check-Out mode');
+  } else {
+    if (btnIn) { btnIn.style.background = '#10b981'; btnIn.style.color = '#fff'; btnIn.classList.add('active'); }
+    if (btnOut) { btnOut.style.background = '#f3f4f6'; btnOut.style.color = '#374151'; btnOut.classList.remove('active'); }
+    if (submitBtn) { submitBtn.textContent = 'Check-In (Time-In)'; submitBtn.style.background = 'var(--primary)'; }
+    toast('Scanner set to Check-In mode');
+  }
 }
 
 // ---------- rendering ----------
@@ -650,11 +670,16 @@ document.getElementById('scanForm').addEventListener('submit', async e => {
     return;
   }
   state.lastScanId = scanId;
-  setFeedback(`Checking ID ${scanId}…`, '');
+  const currentMode = state.scanMode || 'check-in';
+  setFeedback(`Processing ${currentMode === 'check-out' ? 'Check-Out' : 'Check-In'} for ID ${scanId}…`, '');
   try {
-    const r = await post(`/api/sessions/${state.currentSession}/scan`, { scanId });
-    const lateText = r.status === 'late' ? ' (LATE)' : '';
-    setFeedback(`${r.student.name} checked in at ${fmtTime(r.time)}${lateText}`, r.status === 'late' ? 'err' : 'ok');
+    const r = await post(`/api/sessions/${state.currentSession}/scan`, { scanId, mode: currentMode });
+    if (r.mode === 'check-out') {
+      setFeedback(`🔴 ${r.student.name} checked OUT at ${fmtTime(r.time)}`, 'ok');
+    } else {
+      const lateText = r.status === 'late' ? ' (LATE)' : '';
+      setFeedback(`🟢 ${r.student.name} checked IN at ${fmtTime(r.time)}${lateText}`, r.status === 'late' ? 'err' : 'ok');
+    }
     await loadAll();
   } catch (err) {
     state.lastScanId = '';
@@ -751,9 +776,12 @@ function renderSheet() {
     else if (v === 'absent') absent++;
     else unmarked++;
     
-    const meta = (v === 'present' || v === 'late') && rec.scannedAt
-      ? `<span class="scan-meta">checked in ${fmtTime(rec.scannedAt)}</span>`
-      : (isAutoExempted ? `<span class="scan-meta" style="color:#7e22ce; font-weight:600;">✨ Auto-Exempted (${esc(s.role)})</span>` : '');
+    let metaIn = rec.scannedAt ? `<span class="scan-meta" style="color:#059669; font-weight:600;">🟢 In: ${fmtTime(rec.scannedAt)}</span>` : '';
+    let metaOut = rec.checkOutAt ? `<span class="scan-meta" style="color:#dc2626; font-weight:600;">🔴 Out: ${fmtTime(rec.checkOutAt)}</span>` : '';
+    let meta = [metaIn, metaOut].filter(Boolean).join(' · ');
+    if (!meta && isAutoExempted) {
+      meta = `<span class="scan-meta" style="color:#7e22ce; font-weight:600;">✨ Auto-Exempted (${esc(s.role)})</span>`;
+    }
 
     const roleClass = (s.role || 'Student').toLowerCase();
     const roleTag = s.role && s.role !== 'Student'

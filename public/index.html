@@ -259,9 +259,14 @@
           <span class="pill pill-warn" id="windowBadge">Select an event</span>
         </div>
 
+        <div class="scanner-mode-toggle" style="display:flex; justify-content:center; gap:8px; margin-bottom:12px;">
+          <button type="button" class="btn btn-sm scan-mode-btn active" id="btnScanCheckIn" onclick="setScanMode('check-in')" style="background:#10b981; color:#fff; font-weight:600; padding:6px 16px;">🟢 Check-In (Time-In)</button>
+          <button type="button" class="btn btn-sm scan-mode-btn" id="btnScanCheckOut" onclick="setScanMode('check-out')" style="background:#f3f4f6; color:#374151; font-weight:600; padding:6px 16px;">🔴 Check-Out (Time-Out)</button>
+        </div>
+
         <form id="scanForm" class="scan-form" autocomplete="off">
           <input type="text" id="scanInput" placeholder="Scan or type student ID..." autocomplete="off" disabled>
-          <button class="btn btn-primary" type="submit" disabled>Check in</button>
+          <button class="btn btn-primary" type="submit" id="scanSubmitBtn" disabled>Check-In</button>
         </form>
 
         <div class="scan-feedback" id="scanFeedback">

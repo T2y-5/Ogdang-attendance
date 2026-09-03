@@ -66,6 +66,7 @@ const AttendanceSchema = new mongoose.Schema({
   studentId: { type: String, required: true },
   status: { type: String, enum: ['present', 'late', 'exempted', 'absent', 'unmarked'], default: 'unmarked' },
   scannedAt: { type: Number, default: null },
+  checkOutAt: { type: Number, default: null },
   excuse: { type: String, default: '' }
 });
 
@@ -275,6 +276,7 @@ module.exports = {
         role: st.role || 'Student',
         status: att ? att.status : 'unmarked',
         scannedAt: att ? att.scannedAt : null,
+        checkOutAt: att ? att.checkOutAt : null,
         excuse: att ? att.excuse || '' : ''
       };
     });
@@ -282,10 +284,11 @@ module.exports = {
     return { session, records };
   },
 
-  async setAttendanceStatus(sessionId, studentId, status, excuse = '') {
+  async setAttendanceStatus(sessionId, studentId, status, excuse = '', scannedAt = Date.now()) {
+    const existing = await Attendance.findOne({ sessionId, studentId }).lean();
     await Attendance.updateOne(
       { sessionId, studentId },
-      { sessionId, studentId, status, scannedAt: Date.now(), excuse },
+      { sessionId, studentId, status, scannedAt: existing?.scannedAt || scannedAt, excuse },
       { upsert: true }
     );
 
@@ -294,8 +297,33 @@ module.exports = {
       sessionId,
       studentId,
       status,
-      scannedAt: Date.now(),
+      scannedAt: existing?.scannedAt || scannedAt,
       excuse,
+      studentName: student ? student.name : ''
+    };
+  },
+
+  async setCheckOutStatus(sessionId, studentId) {
+    const existing = await Attendance.findOne({ sessionId, studentId }).lean();
+    const checkOutAt = Date.now();
+    
+    // If student was unmarked, mark them present upon check-out
+    const status = (existing && existing.status !== 'unmarked') ? existing.status : 'present';
+    const scannedAt = existing?.scannedAt || checkOutAt;
+
+    await Attendance.updateOne(
+      { sessionId, studentId },
+      { sessionId, studentId, status, scannedAt, checkOutAt },
+      { upsert: true }
+    );
+
+    const student = await Student.findOne({ id: studentId }).lean();
+    return {
+      sessionId,
+      studentId,
+      status,
+      scannedAt,
+      checkOutAt,
       studentName: student ? student.name : ''
     };
   },
